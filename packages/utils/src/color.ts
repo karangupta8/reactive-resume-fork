@@ -1,5 +1,79 @@
 import type { ColorResult } from "@uiw/color-convert";
-import { hsvaToHex, rgbaStringToHsva } from "@uiw/color-convert";
+
+type Hsva = { h: number; s: number; v: number; a: number };
+
+function hsvaToRgba(hsva: Hsva): ColorResult["rgba"] {
+	const h = hsva.h / 360;
+	const s = hsva.s / 100;
+	const v = hsva.v / 100;
+	const i = Math.floor(h * 6);
+	const f = h * 6 - i;
+	const p = v * (1 - s);
+	const q = v * (1 - f * s);
+	const t = v * (1 - (1 - f) * s);
+	let r = 0;
+	let g = 0;
+	let b = 0;
+	switch (i % 6) {
+		case 0:
+			r = v;
+			g = t;
+			b = p;
+			break;
+		case 1:
+			r = q;
+			g = v;
+			b = p;
+			break;
+		case 2:
+			r = p;
+			g = v;
+			b = t;
+			break;
+		case 3:
+			r = p;
+			g = q;
+			b = v;
+			break;
+		case 4:
+			r = t;
+			g = p;
+			b = v;
+			break;
+		case 5:
+			r = v;
+			g = p;
+			b = q;
+			break;
+	}
+	return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255), a: hsva.a };
+}
+
+function hsvaToHex(hsva: Hsva): string {
+	const { r, g, b } = hsvaToRgba(hsva);
+	return `#${toHexComponent(r)}${toHexComponent(g)}${toHexComponent(b)}`;
+}
+
+function rgbaStringToHsva(rgba: string): Hsva {
+	const match = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\s*\)/.exec(rgba);
+	if (!match) return { h: 0, s: 0, v: 0, a: 1 };
+	const r = Number.parseInt(match[1] ?? "0", 10) / 255;
+	const g = Number.parseInt(match[2] ?? "0", 10) / 255;
+	const b = Number.parseInt(match[3] ?? "0", 10) / 255;
+	const a = match[4] ? Number.parseFloat(match[4]) : 1;
+	const max = Math.max(r, g, b);
+	const min = Math.min(r, g, b);
+	const d = max - min;
+	const v = max;
+	const s = max === 0 ? 0 : d / max;
+	let h = 0;
+	if (max !== min) {
+		if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+		else if (max === g) h = ((b - r) / d + 2) / 6;
+		else h = ((r - g) / d + 4) / 6;
+	}
+	return { h: h * 360, s: s * 100, v: v * 100, a };
+}
 
 export function rgbaStringToHex(rgba: string): string {
 	const color = parseColorString(rgba);

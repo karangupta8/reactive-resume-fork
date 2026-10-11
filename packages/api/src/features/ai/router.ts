@@ -1,49 +1,36 @@
-import type { ResumeData } from "@reactive-resume/schema/resume/data";
-import type { UIMessage } from "ai";
 import { ORPCError } from "@orpc/client";
-import { type } from "@orpc/server";
 import { AISDKError } from "ai";
 import { flattenError, ZodError, z } from "zod";
-import { storedResumeAnalysisSchema } from "@reactive-resume/schema/resume/analysis";
+import { resumeDataSchema } from "@reactive-resume/schema/resume/data";
 import { protectedProcedure } from "../../context";
 import { aiRequestRateLimit } from "../../middleware/rate-limit";
 import { aiProvidersService } from "../ai-providers/service";
-import { resumeService } from "../resume/service";
+import { atsReviewInputSchema, atsReviewOutputSchema, reviewResumeText } from "./ats-review";
+import { improveInputSchema, improveLine, improveOutputSchema } from "./improve";
 import { aiService, fileInputSchema } from "./service";
 
-function isInvalidAiBaseUrlError(error: unknown): boolean {
-	return error instanceof Error && error.message === "INVALID_AI_BASE_URL";
+/**
+ * Every AI procedure fails the same ways: no ENCRYPTION_SECRET, a bad base URL, the provider erroring (its cause kept
+ * for upstream error reporters), or the model returning a shape that can't be used, named per procedure.
+ */
+function rethrowAiError(error: unknown, invalidStructure: string): never {
+	if (error instanceof Error && error.message === "AI_CREDENTIAL_ENCRYPTION_UNAVAILABLE")
+		throw new ORPCError("PRECONDITION_FAILED", {
+			message: "AI providers are unavailable because ENCRYPTION_SECRET is not configured.",
+		});
+	if (error instanceof Error && error.message === "INVALID_AI_BASE_URL")
+		throw new ORPCError("BAD_REQUEST", { message: "Invalid AI provider configuration." });
+	if (error instanceof AISDKError)
+		throw new ORPCError("BAD_GATEWAY", { message: "Could not reach the AI provider.", cause: error });
+	if (error instanceof ZodError)
+		throw new ORPCError("BAD_REQUEST", { message: invalidStructure, cause: flattenError(error) });
+	throw error;
 }
 
-function isAiProviderGatewayError(error: unknown): boolean {
-	return error instanceof AISDKError;
-}
-
-function isCredentialEncryptionUnavailable(error: unknown): boolean {
-	return error instanceof Error && error.message === "AI_CREDENTIAL_ENCRYPTION_UNAVAILABLE";
-}
-
-/** Throws a BAD_GATEWAY ORPCError, preserving the original cause for upstream error reporters. */
-function throwAiProviderGatewayError(cause?: unknown): never {
-	throw new ORPCError("BAD_GATEWAY", { message: "Could not reach the AI provider.", cause });
-}
-
-function throwAiProviderConfigError(): never {
-	throw new ORPCError("BAD_REQUEST", { message: "Invalid AI provider configuration." });
-}
-
-function throwCredentialEncryptionUnavailable(): never {
-	throw new ORPCError("PRECONDITION_FAILED", {
-		message: "AI providers are unavailable because ENCRYPTION_SECRET is not configured.",
-	});
-}
-
-function throwResumeStructureError(error: ZodError): never {
-	throw new ORPCError("BAD_REQUEST", {
-		message: "Invalid resume data structure",
-		cause: flattenError(error),
-	});
-}
+const aiErrors = {
+	BAD_GATEWAY: { message: "The AI provider returned an error or is unreachable.", status: 502 },
+	BAD_REQUEST: { message: "The AI returned an improperly formatted structure.", status: 400 },
+} as const;
 
 async function getRunnableProvider(userId: string, aiProviderId?: string) {
 	const provider = aiProviderId
@@ -64,16 +51,14 @@ export const aiRouter = {
 			operationId: "parseResumePdf",
 			summary: "Parse a PDF file into resume data",
 			description:
-				"Extracts structured resume data from a PDF file using the specified AI provider. The file should be sent as a base64-encoded string along with AI provider credentials. Returns a complete ResumeData object. Requires authentication.",
+				"Extracts structured resume data from a PDF file with one of the user's saved AI providers: the one named by `aiProviderId`, or their default. Send the file as a base64-encoded string. Returns a complete ResumeData object and saves nothing.",
 			successDescription: "The PDF was successfully parsed into structured resume data.",
 		})
 		.input(z.object({ aiProviderId: z.string().optional(), file: fileInputSchema }))
 		.use(aiRequestRateLimit)
-		.errors({
-			BAD_GATEWAY: { message: "The AI provider returned an error or is unreachable.", status: 502 },
-			BAD_REQUEST: { message: "The AI returned an improperly formatted structure.", status: 400 },
-		})
-		.handler(async ({ context, input }): Promise<ResumeData> => {
+		.errors(aiErrors)
+		.output(resumeDataSchema)
+		.handler(async ({ context, input }) => {
 			try {
 				const provider = await getRunnableProvider(context.user.id, input.aiProviderId);
 				return await aiService.parsePdf({
@@ -84,11 +69,7 @@ export const aiRouter = {
 					file: input.file,
 				});
 			} catch (error) {
-				if (isCredentialEncryptionUnavailable(error)) throwCredentialEncryptionUnavailable();
-				if (isInvalidAiBaseUrlError(error)) throwAiProviderConfigError();
-				if (isAiProviderGatewayError(error)) throwAiProviderGatewayError(error);
-				if (error instanceof ZodError) throwResumeStructureError(error);
-				throw error;
+				rethrowAiError(error, "Invalid resume data structure");
 			}
 		}),
 
@@ -100,7 +81,7 @@ export const aiRouter = {
 			operationId: "parseResumeDocx",
 			summary: "Parse a DOCX file into resume data",
 			description:
-				"Extracts structured resume data from a DOCX or DOC file using the specified AI provider. The file should be sent as a base64-encoded string along with AI provider credentials and the document's media type. Returns a complete ResumeData object. Requires authentication.",
+				"Extracts structured resume data from a DOCX or DOC file with one of the user's saved AI providers: the one named by `aiProviderId`, or their default. Send the file as a base64-encoded string with the document's media type. Returns a complete ResumeData object and saves nothing.",
 			successDescription: "The DOCX was successfully parsed into structured resume data.",
 		})
 		.input(
@@ -114,10 +95,8 @@ export const aiRouter = {
 			}),
 		)
 		.use(aiRequestRateLimit)
-		.errors({
-			BAD_GATEWAY: { message: "The AI provider returned an error or is unreachable.", status: 502 },
-			BAD_REQUEST: { message: "The AI returned an improperly formatted structure.", status: 400 },
-		})
+		.errors(aiErrors)
+		.output(resumeDataSchema)
 		.handler(async ({ context, input }) => {
 			try {
 				const provider = await getRunnableProvider(context.user.id, input.aiProviderId);
@@ -130,113 +109,69 @@ export const aiRouter = {
 					file: input.file,
 				});
 			} catch (error) {
-				if (isCredentialEncryptionUnavailable(error)) throwCredentialEncryptionUnavailable();
-				if (isInvalidAiBaseUrlError(error)) throwAiProviderConfigError();
-				if (isAiProviderGatewayError(error)) throwAiProviderGatewayError(error);
-				if (error instanceof ZodError) throwResumeStructureError(error);
-				throw error;
+				rethrowAiError(error, "Invalid resume data structure");
 			}
 		}),
 
-	chat: protectedProcedure
+	atsReview: protectedProcedure
 		.route({
 			method: "POST",
-			path: "/ai/chat",
+			path: "/ai/ats-review",
 			tags: ["AI"],
-			operationId: "aiChat",
-			summary: "Chat with AI to modify resume",
+			operationId: "atsReview",
+			summary: "Review extracted resume text",
 			description:
-				"Streams a chat response from the configured AI provider. The LLM can call the propose_resume_patches tool to generate JSON Patch proposals for explicit user approval. Requires authentication and AI provider credentials.",
+				"Reviews the plain text extracted from a resume PDF and returns qualitative feedback: a summary, rewrite suggestions, strengths, and — when a job description is supplied — how the candidate's experience lines up with the role. Deliberately returns no score: the deterministic ATS report owns the only number in this feature. Requires authentication and AI credentials.",
+			successDescription: "Qualitative review returned successfully.",
 		})
-		.input(
-			type<{
-				aiProviderId?: string;
-				messages: UIMessage[];
-				resumeId: string;
-			}>(),
-		)
+		.input(atsReviewInputSchema)
 		.use(aiRequestRateLimit)
+		.output(atsReviewOutputSchema)
+		.errors(aiErrors)
 		.handler(async ({ context, input }) => {
 			try {
-				const [provider, resume] = await Promise.all([
-					getRunnableProvider(context.user.id, input.aiProviderId),
-					resumeService.getById({ id: input.resumeId, userId: context.user.id }),
-				]);
+				const provider = await getRunnableProvider(context.user.id, input.aiProviderId);
 
-				return await aiService.chat({
+				return await reviewResumeText({
+					...input,
 					provider: provider.provider,
 					model: provider.model,
 					apiKey: provider.apiKey,
 					baseURL: provider.baseURL ?? "",
-					messages: input.messages,
-					resumeData: resume.data,
-					resumeUpdatedAt: resume.updatedAt,
 				});
 			} catch (error) {
-				if (isCredentialEncryptionUnavailable(error)) throwCredentialEncryptionUnavailable();
-				if (isInvalidAiBaseUrlError(error)) throwAiProviderConfigError();
-				if (isAiProviderGatewayError(error)) throwAiProviderGatewayError(error);
-				throw error;
+				rethrowAiError(error, "Invalid ATS review structure");
 			}
 		}),
 
-	analyzeResume: protectedProcedure
+	improve: protectedProcedure
 		.route({
 			method: "POST",
-			path: "/ai/analyze-resume",
+			path: "/ai/improve",
 			tags: ["AI"],
-			operationId: "analyzeResume",
-			summary: "Analyze resume and persist latest analysis",
+			operationId: "improveLine",
+			summary: "Suggest a rewrite of one line",
 			description:
-				"Uses AI to analyze the current resume and returns a structured analysis with scorecard, strengths, and improvement suggestions. The latest analysis is persisted and can be fetched later. Requires authentication and AI credentials.",
-			successDescription: "Structured resume analysis returned and persisted successfully.",
+				"Suggests a rewrite of one line of a resume or cover letter: a stronger verb, an added result, a shorter version, or the user's own request. Returns the new line, a short reason, and whether it states anything the input didn't, so the user can check it. Writes nothing. Requires authentication and AI credentials.",
+			successDescription: "The suggested line.",
 		})
-		.input(
-			z.object({
-				aiProviderId: z.string().optional(),
-				resumeId: z.string(),
-			}),
-		)
+		.input(improveInputSchema)
 		.use(aiRequestRateLimit)
-		.output(storedResumeAnalysisSchema)
-		.errors({
-			BAD_GATEWAY: { message: "The AI provider returned an error or is unreachable.", status: 502 },
-			BAD_REQUEST: { message: "The AI returned an improperly formatted structure.", status: 400 },
-		})
+		.output(improveOutputSchema)
+		.errors(aiErrors)
 		.handler(async ({ context, input }) => {
 			try {
-				const [provider, resume] = await Promise.all([
-					getRunnableProvider(context.user.id, input.aiProviderId),
-					resumeService.getById({ id: input.resumeId, userId: context.user.id }),
-				]);
-				const analysis = await aiService.analyzeResume({
+				const provider = await getRunnableProvider(context.user.id, input.aiProviderId);
+
+				return await improveLine({
+					...input,
 					provider: provider.provider,
 					model: provider.model,
 					apiKey: provider.apiKey,
 					baseURL: provider.baseURL ?? "",
-					resumeData: resume.data,
-				});
-
-				return await resumeService.analysis.upsert({
-					id: input.resumeId,
-					userId: context.user.id,
-					analysis: {
-						...analysis,
-						updatedAt: new Date(),
-						modelMeta: { provider: provider.provider, model: provider.model },
-					},
 				});
 			} catch (error) {
-				if (isCredentialEncryptionUnavailable(error)) throwCredentialEncryptionUnavailable();
-				if (isInvalidAiBaseUrlError(error)) throwAiProviderConfigError();
-				if (isAiProviderGatewayError(error)) throwAiProviderGatewayError(error);
-				if (error instanceof ZodError) {
-					throw new ORPCError("BAD_REQUEST", {
-						message: "Invalid resume analysis structure",
-						cause: flattenError(error),
-					});
-				}
-				throw error;
+				rethrowAiError(error, "Invalid suggestion structure");
 			}
 		}),
 };

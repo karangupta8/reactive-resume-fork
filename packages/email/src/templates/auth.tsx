@@ -1,3 +1,4 @@
+import * as React from "react";
 import {
 	Body,
 	Button,
@@ -15,6 +16,9 @@ import {
 	Tailwind,
 	Text,
 } from "react-email";
+
+// ponytail: server dev consumes this source through tsx, which emits React.createElement here.
+void React;
 
 const appName = "Reactive Resume";
 const logoUrl = "https://rxresu.me/icon/dark.svg";
@@ -66,7 +70,7 @@ function AuthEmailLayout({ preview, heading, intro, details, actionLabel, action
 					/>
 				</Head>
 
-				<Body className="m-0 bg-zinc-950 p-0 font-body text-sm text-zinc-50">
+				<Body className="font-body m-0 bg-zinc-950 p-0 text-sm text-zinc-50">
 					<Preview>{preview}</Preview>
 					<Container className="mx-auto w-full max-w-xl bg-zinc-900 p-6 text-zinc-50">
 						<Section>
@@ -74,7 +78,7 @@ function AuthEmailLayout({ preview, heading, intro, details, actionLabel, action
 						</Section>
 
 						<Section className="mt-6">
-							<Heading className="whitespace-break-spaces font-heading font-medium text-2xl leading-0 tracking-tighter md:text-5xl">
+							<Heading className="font-heading text-2xl leading-0 font-medium tracking-tighter whitespace-break-spaces md:text-5xl">
 								{heading}
 							</Heading>
 
@@ -96,7 +100,7 @@ function AuthEmailLayout({ preview, heading, intro, details, actionLabel, action
 								<Text className="leading-0">
 									If the button does not work, copy and paste this link into your browser:
 								</Text>
-								<Link className="text-zinc-200/60 leading-0 underline underline-offset-2" href={actionUrl}>
+								<Link className="leading-0 text-zinc-200/60 underline underline-offset-2" href={actionUrl}>
 									{actionUrl}
 								</Link>
 							</Section>
@@ -121,7 +125,7 @@ function AuthEmailLayout({ preview, heading, intro, details, actionLabel, action
 								.
 							</Text>
 
-							<Text className="mt-8 font-heading font-medium text-base tracking-tight opacity-80">Reactive Resume</Text>
+							<Text className="font-heading mt-8 text-base font-medium tracking-tight opacity-80">Reactive Resume</Text>
 						</Section>
 					</Container>
 				</Body>
@@ -158,7 +162,7 @@ export function VerifyEmail({ url }: VerifyEmailProps) {
 			preview={`Verify your email for ${appName}`}
 			heading="Verify Email"
 			intro={`Thanks for signing up for ${appName}. Please verify your email address to continue.`}
-			details="Verification helps us protect your account and keep your sign-in secure."
+			details="This confirms the address belongs to you, which keeps your account secure."
 			actionLabel="Verify Email"
 			actionUrl={url}
 			outro="If you did not create this account, you can safely ignore this email."
@@ -177,11 +181,11 @@ export function VerifyEmailChange({ url, previousEmail, newEmail }: VerifyEmailC
 		<AuthEmailLayout
 			preview={`Confirm your new ${appName} email address`}
 			heading="Confirm Email Change"
-			intro={`You requested to change your ${appName} email from ${previousEmail} to ${newEmail}.`}
-			details="Confirm this change to complete the update and keep your account access uninterrupted."
+			intro={`You asked to change your ${appName} email from ${previousEmail} to ${newEmail}.`}
+			details="The change takes effect once you confirm it here."
 			actionLabel="Verify New Email"
 			actionUrl={url}
-			outro="If you did not request this change, ignore this email and secure your account."
+			outro="If you did not request this change, ignore this email. The address on the account will not change unless it is confirmed here."
 		/>
 	);
 }

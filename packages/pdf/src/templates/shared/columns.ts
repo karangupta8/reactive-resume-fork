@@ -1,4 +1,4 @@
-import type { Style } from "@react-pdf/types";
+import type { Style } from "../../forme/style-types";
 import type { TemplatePlacement } from "./styles";
 
 const MIN_SECTION_COLUMNS = 1;
@@ -16,7 +16,7 @@ type SectionTimelineInput = {
 	columns: unknown;
 };
 
-export type SectionItemsLayout = {
+type SectionItemsLayout = {
 	columns: number;
 	containerStyle: Style;
 	rowStyle: Style | undefined;

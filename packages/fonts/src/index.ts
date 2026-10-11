@@ -1,13 +1,16 @@
 import type { Locale, Script } from "@reactive-resume/utils/locale";
-import { unique } from "@reactive-resume/utils/field";
 import { getLocaleScript, isCjkScript } from "@reactive-resume/utils/locale";
+
+// ponytail: inlined from @reactive-resume/utils/field (sole consumer)
+const unique = <T>(items: T[]): T[] => [...new Set(items)];
+
 import webFontListJSON from "./webfontlist.json";
 
-export type FontCategory = "display" | "handwriting" | "monospace" | "serif" | "sans-serif";
+type FontCategory = "display" | "handwriting" | "monospace" | "serif" | "sans-serif";
 export type FontWeight = "100" | "200" | "300" | "400" | "500" | "600" | "700" | "800" | "900";
-export type FontFileWeight = FontWeight | `${FontWeight}italic`;
+type FontFileWeight = FontWeight | `${FontWeight}italic`;
 
-export type StandardFont = {
+type StandardFont = {
 	type: "standard";
 	category: FontCategory;
 	family: string;
@@ -23,7 +26,7 @@ export type WebFont = {
 	files: Record<FontFileWeight, string>;
 };
 
-export type FontRecord = StandardFont | WebFont;
+type FontRecord = StandardFont | WebFont;
 
 const preferredChineseFontFamilies = [
 	"Noto Sans SC",
@@ -64,25 +67,6 @@ const fontDisplayNames: Partial<Record<string, string>> = {
 	"ZCOOL QingKe HuangYou": "站酷庆科黄油体",
 };
 
-const resumeCjkSansFontFallbacks = [
-	"Noto Sans SC",
-	"PingFang SC",
-	"Hiragino Sans GB",
-	"Microsoft YaHei",
-	"SimHei",
-	"Source Han Sans SC",
-	"WenQuanYi Micro Hei",
-] as const;
-
-const resumeCjkSerifFontFallbacks = [
-	"Noto Serif SC",
-	"Songti SC",
-	"SimSun",
-	"Source Han Serif SC",
-	"KaiTi",
-	"FangSong",
-] as const;
-
 // Per-script Noto web font, split by serif/sans category. These match the
 // actual writing system: Hangul lives only in the KR fonts, Kana only in JP,
 // Arabic glyphs only in the Arabic fonts, etc. — so a Latin or Simplified-
@@ -98,53 +82,40 @@ const scriptFonts: Record<Script, { serif: string; sansSerif: string }> = {
 	arabic: { serif: "Noto Naskh Arabic", sansSerif: "Noto Sans Arabic" },
 	hebrew: { serif: "Noto Sans Hebrew", sansSerif: "Noto Sans Hebrew" },
 	thai: { serif: "Noto Sans Thai", sansSerif: "Noto Sans Thai" },
+	// Monochrome outlines (TrueType glyf, not CBDT bitmaps) so react-pdf can
+	// embed them; the serif/sans distinction is meaningless for emoji (#3321).
+	emoji: { serif: "Noto Emoji", sansSerif: "Noto Emoji" },
+	// Text symbols (★, ☆, ●, ■, ◆, ✦, ✓) that aren't emoji (#3581).
+	symbols: { serif: "Noto Sans Symbols 2", sansSerif: "Noto Sans Symbols 2" },
 };
 
-const genericFontFamilies = new Set([
-	"-apple-system",
-	"BlinkMacSystemFont",
-	"cursive",
-	"emoji",
-	"fantasy",
-	"fangsong",
-	"math",
-	"monospace",
-	"sans-serif",
-	"serif",
-	"system-ui",
-	"ui-monospace",
-	"ui-rounded",
-	"ui-sans-serif",
-	"ui-serif",
-]);
+// Covers General Punctuation (U+2000–U+206F) and other symbols missing from
+// many Latin body fonts (e.g. U+2022 BULLET in IBM Plex Serif). react-pdf has
+// no browser-style system fallback, so we register Noto as a last-resort
+// glyph source in the PDF font stack (#3190).
+const punctuationFallbackFonts = {
+	serif: "Noto Serif",
+	sansSerif: "Noto Sans",
+} as const;
 
-export const webFontList = webFontListJSON as WebFont[];
-export const webFontMap = new Map<string, WebFont>(webFontList.map((font) => [font.family, font]));
-export const standardFontList = standardPdfFontList.filter((font) => !webFontMap.has(font.family));
+const webFontList = webFontListJSON as WebFont[];
+const webFontMap = new Map<string, WebFont>(webFontList.map((font) => [font.family, font]));
+const standardFontList = standardPdfFontList.filter((font) => !webFontMap.has(font.family));
 
 const fontMap = new Map<string, FontRecord>();
 const chinesePrioritySet = new Set<string>(preferredChineseFontFamilies);
 
-function orderFonts(fonts: FontRecord[]) {
-	return [...fonts].sort((a, b) => {
-		return a.family.localeCompare(b.family, undefined, { sensitivity: "base" });
-	});
-}
-
-function toCSSFontFamilyToken(fontFamily: string) {
-	if (genericFontFamilies.has(fontFamily)) return fontFamily;
-	return `'${fontFamily.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
-}
-
-export const fontList = orderFonts([...standardFontList, ...webFontList]);
+export const fontList = [...standardFontList, ...webFontList].sort((a, b) =>
+	a.family.localeCompare(b.family, undefined, { sensitivity: "base" }),
+);
 
 for (const font of fontList) {
 	fontMap.set(font.family, font);
 }
 
 // Compatibility aliases for fonts that v5.0.x resolved via the browser
-// (Arial, Times New Roman, ...) but that aren't registered with
-// @react-pdf/renderer in v5.1+. Targets are metric-compatible web fonts
+// (Arial, Times New Roman, ...) but that the PDF engine doesn't know by
+// name. Targets are metric-compatible web fonts
 // already shipped in webfontlist (#2989).
 const legacyFontAliases: Record<string, string> = {
 	Arial: "Arimo",
@@ -166,10 +137,6 @@ export function getFont(family: string) {
 	return alias ? fontMap.get(alias) : undefined;
 }
 
-function getFontCategory(family: string): FontCategory | null {
-	return getFont(family)?.category ?? null;
-}
-
 export function getFontDisplayName(family: string) {
 	return fontDisplayNames[family] ?? family;
 }
@@ -182,18 +149,14 @@ export function getFontSearchKeywords(family: string) {
 	);
 }
 
-function getCjkFallbacksByCategory(category: FontCategory | null) {
-	return category === "serif" ? resumeCjkSerifFontFallbacks : resumeCjkSansFontFallbacks;
-}
-
-function getPrimaryCjkWebFont(family: string) {
-	const category = getFontCategory(family);
-	return category === "serif" ? "Noto Serif SC" : "Noto Sans SC";
-}
-
 function getScriptFont(script: Script, category: FontCategory | null) {
 	const variants = scriptFonts[script];
 	return category === "serif" ? variants.serif : variants.sansSerif;
+}
+
+function getPunctuationFallbackFont(category: FontCategory | null) {
+	const family = category === "serif" ? punctuationFallbackFonts.serif : punctuationFallbackFonts.sansSerif;
+	return getWebFont(family) ? family : null;
 }
 
 export function isStandardPdfFontFamily(family: string) {
@@ -216,11 +179,48 @@ export function sortFontWeights<T extends string>(fontWeights: T[]): T[] {
 	return [...fontWeights].sort((a, b) => Number(a) - Number(b));
 }
 
-export function getFallbackWebFontFamilies(family: string) {
-	if (isStandardPdfFontFamily(family)) return [];
+/**
+ * Resolves the font weight used for bold text (`<strong>`, rich-text bold
+ * and the template `bold` styles).
+ *
+ * The last stored body weight is ambiguous: families are commonly stored as
+ * `["400", "600"]` (the default pairing from the typography picker), which
+ * renders `<strong>` at SemiBold — nearly indistinguishable from Regular for
+ * faces like Open Sans (#3310). Bold text should use the family's true Bold
+ * face when one exists.
+ *
+ * Resolution order:
+ * 1. A stored weight at or above Bold (700) that the family actually has —
+ *    that is a deliberate bold-class choice by the user, so keep it.
+ * 2. The family's true Bold face ("700").
+ * 3. The heaviest available face at or above SemiBold (600).
+ * 4. `null` — the family has no bold-class face; callers keep their existing
+ *    `fontWeights.at(-1)` fallback.
+ *
+ * `family` may be a PDF fallback stack (`string[]`, see #2986); the primary
+ * (first) family decides because `fontWeight` applies across the stack.
+ */
+export function resolveBoldFontWeight(family: string | string[], storedWeights: readonly string[]): FontWeight | null {
+	const familyName = Array.isArray(family) ? family[0] : family;
+	if (!familyName) return null;
 
-	const fallback = getPrimaryCjkWebFont(family);
-	return fallback === family ? [] : [fallback];
+	const weights = getFont(familyName)?.weights;
+	if (!weights || weights.length === 0) return null;
+
+	const available = new Set<FontWeight>(weights);
+
+	const deliberateBoldClass = sortFontWeights(
+		storedWeights.filter(
+			(weight): weight is FontWeight => available.has(weight as FontWeight) && Number(weight) >= 700,
+		),
+	);
+	const heaviestDeliberate = deliberateBoldClass[deliberateBoldClass.length - 1];
+	if (heaviestDeliberate) return heaviestDeliberate;
+
+	if (available.has("700")) return "700";
+
+	const boldClass = sortFontWeights(weights.filter((weight) => Number(weight) >= 600));
+	return boldClass[boldClass.length - 1] ?? null;
 }
 
 /**
@@ -240,7 +240,7 @@ export function getPdfFallbackFontFamilies(
 	family: string,
 	options: { locale?: Locale; scripts?: Iterable<Script> } = {},
 ): string[] {
-	const category = getFontCategory(family);
+	const category = getFont(family)?.category ?? null;
 
 	const ordered: Script[] = [];
 	const localeScript = getLocaleScript(options.locale);
@@ -248,56 +248,14 @@ export function getPdfFallbackFontFamilies(
 	if (options.scripts) ordered.push(...options.scripts);
 	if (ordered.some(isCjkScript)) ordered.push("han-simplified");
 
-	return unique(ordered.map((script) => getScriptFont(script, category)))
+	const fallbacks = unique(ordered.map((script) => getScriptFont(script, category)))
 		.filter((candidate) => candidate !== family)
 		.filter((candidate) => Boolean(getWebFont(candidate)));
-}
 
-/**
- * Back-compat single-font resolver kept for the public `@reactive-resume/fonts`
- * surface: returns the Simplified Chinese fallback (Noto Sans/Serif SC) for a
- * family, or `null` when the family already is that fallback.
- */
-export function getPdfCjkFallbackFontFamily(family: string): string | null {
-	const fallback = getPrimaryCjkWebFont(family);
-	if (fallback === family) return null;
-	if (!getWebFont(fallback)) return null;
+	const punctuationFallback = getPunctuationFallbackFont(category);
+	if (punctuationFallback && punctuationFallback !== family && !fallbacks.includes(punctuationFallback)) {
+		fallbacks.push(punctuationFallback);
+	}
 
-	return fallback;
-}
-
-export function getLoadableWebFontWeights(family: string, preferredWeights: string[]) {
-	const font = webFontMap.get(family);
-	if (!font) return [];
-
-	const availableWeights = new Set<FontWeight>(font.weights);
-	const matchingWeights = unique(preferredWeights).filter((weight): weight is FontWeight =>
-		availableWeights.has(weight as FontWeight),
-	);
-
-	if (matchingWeights.length > 0) return matchingWeights;
-
-	const defaultWeights = ["400", "500", "600", "700"].filter((weight): weight is FontWeight =>
-		availableWeights.has(weight as FontWeight),
-	);
-	if (defaultWeights.length > 0) return defaultWeights.slice(0, 2);
-
-	return font.weights.slice(0, 2);
-}
-
-export function buildResumeFontFamily(fontFamily: string) {
-	const category = getFontCategory(fontFamily);
-	const genericFallback = category === "serif" ? "serif" : "sans-serif";
-
-	return unique([
-		fontFamily,
-		...getCjkFallbacksByCategory(category),
-		"system-ui",
-		"-apple-system",
-		"BlinkMacSystemFont",
-		"Segoe UI",
-		genericFallback,
-	])
-		.map(toCSSFontFamilyToken)
-		.join(", ");
+	return fallbacks;
 }

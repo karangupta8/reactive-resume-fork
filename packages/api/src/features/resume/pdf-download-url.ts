@@ -1,7 +1,9 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { env } from "@reactive-resume/env/server";
+import { safeEquals } from "./access";
 
-export const MAX_PDF_DOWNLOAD_URL_TTL_SECONDS = 10 * 60;
+// Long enough to click, short enough that a leaked link is useless soon after.
+const TTL_SECONDS = 10 * 60;
 
 type PdfDownloadTokenPayload = {
 	v: 1;
@@ -15,7 +17,6 @@ type CreateResumePdfDownloadUrlInput = {
 	resumeId: string;
 	userId: string;
 	now?: Date;
-	ttlSeconds?: number;
 };
 
 type VerifyResumePdfDownloadTokenInput = {
@@ -36,11 +37,6 @@ type VerifyResumePdfDownloadTokenResult =
 			reason: "expired" | "invalid_signature" | "malformed" | "resume_mismatch";
 	  };
 
-function resolveTtlSeconds(ttlSeconds: number | undefined) {
-	if (ttlSeconds === undefined || !Number.isFinite(ttlSeconds)) return MAX_PDF_DOWNLOAD_URL_TTL_SECONDS;
-	return Math.min(Math.max(Math.floor(ttlSeconds), 1), MAX_PDF_DOWNLOAD_URL_TTL_SECONDS);
-}
-
 function encodeJson(value: unknown) {
 	return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
 }
@@ -51,13 +47,6 @@ function decodeJson(value: string): unknown {
 
 function sign(payload: string) {
 	return createHmac("sha256", env.AUTH_SECRET).update(payload).digest("base64url");
-}
-
-function signaturesMatch(actual: string, expected: string) {
-	const actualBuffer = Buffer.from(actual);
-	const expectedBuffer = Buffer.from(expected);
-
-	return actualBuffer.byteLength === expectedBuffer.byteLength && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
 function parsePayload(value: unknown): PdfDownloadTokenPayload | null {
@@ -73,13 +62,8 @@ function parsePayload(value: unknown): PdfDownloadTokenPayload | null {
 	return payload as PdfDownloadTokenPayload;
 }
 
-export function createResumePdfDownloadUrl({
-	resumeId,
-	userId,
-	now = new Date(),
-	ttlSeconds,
-}: CreateResumePdfDownloadUrlInput) {
-	const expiresInSeconds = resolveTtlSeconds(ttlSeconds);
+export function createResumePdfDownloadUrl({ resumeId, userId, now = new Date() }: CreateResumePdfDownloadUrlInput) {
+	const expiresInSeconds = TTL_SECONDS;
 	const expiresAt = new Date(now.getTime() + expiresInSeconds * 1000);
 	const payload = encodeJson({
 		v: 1,
@@ -106,7 +90,7 @@ export function verifyResumePdfDownloadToken({
 }: VerifyResumePdfDownloadTokenInput): VerifyResumePdfDownloadTokenResult {
 	const [payload, signature, extra] = token.split(".");
 	if (!payload || !signature || extra !== undefined) return { ok: false, reason: "malformed" };
-	if (!signaturesMatch(signature, sign(payload))) return { ok: false, reason: "invalid_signature" };
+	if (!safeEquals(signature, sign(payload))) return { ok: false, reason: "invalid_signature" };
 
 	try {
 		const parsed = parsePayload(decodeJson(payload));

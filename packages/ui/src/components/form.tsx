@@ -1,5 +1,6 @@
 import { useRender } from "@base-ui/react";
 import * as React from "react";
+import { Icon } from "@reactive-resume/ui/components/icon";
 import { Label } from "@reactive-resume/ui/components/label";
 import { cn } from "@reactive-resume/utils/style";
 
@@ -12,6 +13,20 @@ const FormItemContext = React.createContext<FormItemContextValue>({ id: "", hasE
 
 function useFormItem() {
 	return React.use(FormItemContext);
+}
+
+type FormControlContextValue = {
+	id?: string;
+	labelId?: string;
+	hasError?: boolean;
+	"aria-describedby"?: string;
+	"aria-invalid"?: boolean | "true" | "false";
+};
+
+const FormControlContext = React.createContext<FormControlContextValue | null>(null);
+
+function useFormControl(): FormControlContextValue {
+	return React.use(FormControlContext) ?? {};
 }
 
 type FormItemProps = React.ComponentProps<"div"> & { hasError?: boolean };
@@ -32,32 +47,96 @@ function FormLabel({ className, ...props }: React.ComponentProps<typeof Label>) 
 
 	return (
 		<Label
+			id={`${id}-form-item-label`}
 			data-slot="form-label"
 			data-error={hasError}
-			className={cn("mb-0.5 data-[error=true]:text-destructive", className)}
+			className={cn("data-[error=true]:text-danger-text", className)}
 			htmlFor={`${id}-form-item`}
 			{...props}
 		/>
 	);
 }
 
+const LABELABLE_TAGS = new Set(["button", "input", "meter", "output", "progress", "select", "textarea"]);
+const LABELABLE_ROLES = new Set([
+	"button",
+	"combobox",
+	"gridcell",
+	"listbox",
+	"option",
+	"progressbar",
+	"radio",
+	"searchbox",
+	"slider",
+	"spinbutton",
+	"switch",
+	"tab",
+	"textbox",
+	"treeitem",
+]);
+
+function isLabelableElement(element: Element) {
+	if (LABELABLE_TAGS.has(element.tagName.toLowerCase())) return true;
+	if (element.getAttribute("contenteditable") === "true") return true;
+	const role = element.getAttribute("role");
+	if (role && LABELABLE_ROLES.has(role)) return true;
+	return false;
+}
+
+function useFormControlWarning(controlId: string) {
+	React.useEffect(() => {
+		if (process.env.NODE_ENV === "production") return;
+		if (typeof document === "undefined") return;
+
+		const element = document.getElementById(controlId);
+		if (!element) {
+			console.warn(
+				`FormControl: no element in the document has the generated id "${controlId}". The <FormLabel for="${controlId}"> target is dangling.`,
+			);
+			return;
+		}
+
+		if (!isLabelableElement(element)) {
+			console.warn(
+				`FormControl: the element that carries the generated id "${controlId}" is not a labelable element. A <label for="${controlId}"> will not name the control.`,
+			);
+		}
+	}, [controlId]);
+}
+
 function FormControl({ render, ...props }: useRender.ComponentProps<"div">) {
 	const { id, hasError } = useFormItem();
+	const controlId = `${id}-form-item`;
+	const labelId = `${id}-form-item-label`;
+	const describedBy = hasError ? `${id}-form-item-description ${id}-form-item-message` : `${id}-form-item-description`;
 
-	return useRender({
+	const contextValue = React.useMemo<FormControlContextValue>(
+		() => ({
+			id: controlId,
+			labelId,
+			hasError,
+			"aria-describedby": describedBy,
+			"aria-invalid": hasError,
+		}),
+		[controlId, describedBy, hasError, labelId],
+	);
+
+	useFormControlWarning(controlId);
+
+	const element = useRender({
 		defaultTagName: "div",
 		render,
 		state: { slot: "form-control" },
 		props: {
-			id: `${id}-form-item`,
+			id: controlId,
 			"data-slot": "form-control",
-			"aria-describedby": hasError
-				? `${id}-form-item-description ${id}-form-item-message`
-				: `${id}-form-item-description`,
+			"aria-describedby": describedBy,
 			"aria-invalid": hasError,
 			...props,
 		},
 	});
+
+	return <FormControlContext.Provider value={contextValue}>{element}</FormControlContext.Provider>;
 }
 
 function FormDescription({ className, ...props }: React.ComponentProps<"p">) {
@@ -67,7 +146,7 @@ function FormDescription({ className, ...props }: React.ComponentProps<"p">) {
 		<p
 			data-slot="form-description"
 			id={`${id}-form-item-description`}
-			className={cn("text-muted-foreground text-xs leading-normal", className)}
+			className={cn("text-[13px] leading-[18px] text-ink-3", className)}
 			{...props}
 		/>
 	);
@@ -102,12 +181,17 @@ function FormMessage({ className, errors, ...props }: FormMessageProps) {
 			id={`${id}-form-item-message`}
 			data-error={hasError}
 			data-slot="form-message"
-			className={cn("line-clamp-1 text-xs", hasError ? "text-destructive" : "text-muted-foreground", className)}
+			className={cn(
+				"flex items-start gap-1 text-xs leading-4 transition-opacity duration-quick ease-enter starting:opacity-0",
+				hasError ? "text-danger-text" : "text-ink-3",
+				className,
+			)}
 			{...props}
 		>
-			{body}
+			{hasError && <Icon name="warning-circle" size={16} className="shrink-0" />}
+			<span>{body}</span>
 		</p>
 	);
 }
 
-export { FormControl, FormDescription, FormItem, FormLabel, FormMessage };
+export { FormControl, FormControlContext, FormDescription, FormItem, FormLabel, FormMessage, useFormControl };

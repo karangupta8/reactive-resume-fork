@@ -1,11 +1,11 @@
-import type { Style } from "@react-pdf/types";
+import type { Style } from "../../forme/style-types";
 import type { StyleInput } from "./styles";
 import { composeStyles } from "./styles";
 
-const parseFiniteNumber = (value: unknown): number | undefined =>
+export const parseFiniteNumber = (value: unknown): number | undefined =>
 	typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
-const parsePxValue = (value: unknown): number | undefined => {
+export const parsePxValue = (value: unknown): number | undefined => {
 	if (typeof value !== "string" || !value.endsWith("px")) return undefined;
 
 	const parsedValue = Number.parseFloat(value);

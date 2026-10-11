@@ -1,22 +1,24 @@
+import type { ReactNode } from "react";
 import type z from "zod";
+import { t } from "@lingui/core/macro";
 import { Trans } from "@lingui/react/macro";
-import { useStore } from "@tanstack/react-form";
+import { useSelector } from "@tanstack/react-form";
 import { AnimatePresence, m } from "motion/react";
 import { colorDesignSchema, levelDesignSchema } from "@reactive-resume/schema/resume/data";
 import { resolveLevelDisplaySizes } from "@reactive-resume/schema/resume/level-display-sizes";
-import { resolveStyleRuleFontSize } from "@reactive-resume/schema/resume/style-rules";
 import { FormControl, FormItem, FormLabel, FormMessage } from "@reactive-resume/ui/components/form";
 import { Input } from "@reactive-resume/ui/components/input";
 import { Separator } from "@reactive-resume/ui/components/separator";
 import { cn } from "@reactive-resume/utils/style";
+import { SectionBase } from "../shared/section-base";
 import { ColorPicker } from "@/components/input/color-picker";
 import { IconPicker } from "@/components/input/icon-picker";
 import { LevelTypeCombobox } from "@/components/level/combobox";
 import { LevelDisplay } from "@/components/level/display";
 import { useCurrentResume, useUpdateResumeData } from "@/features/resume/builder/draft";
 import { useSyncFormValues } from "@/hooks/use-sync-form-values";
+import { D1, EASE } from "@/libs/motion";
 import { useAppForm } from "@/libs/tanstack-form";
-import { SectionBase } from "../shared/section-base";
 
 export function DesignSectionBuilder() {
 	return (
@@ -30,6 +32,25 @@ export function DesignSectionBuilder() {
 
 type ColorValues = z.infer<typeof colorDesignSchema>;
 
+function useColorSectionForm(colors: ColorValues, persist: (data: ColorValues) => void) {
+	const form = useAppForm({
+		defaultValues: colors,
+		validators: { onChange: colorDesignSchema },
+		listeners: {
+			onChange: ({ formApi }) => {
+				persist(formApi.state.values);
+			},
+		},
+		onSubmit: ({ value }) => {
+			persist(value);
+		},
+	});
+	useSyncFormValues(form, colors);
+	return form;
+}
+
+type ColorSectionForm = ReturnType<typeof useColorSectionForm>;
+
 function ColorSectionForm() {
 	const resume = useCurrentResume();
 	const colors = resume.data.metadata.design.colors;
@@ -41,18 +62,7 @@ function ColorSectionForm() {
 		});
 	};
 
-	const form = useAppForm({
-		defaultValues: colors,
-		validators: { onChange: colorDesignSchema },
-		onSubmit: ({ value }) => {
-			persist(value);
-		},
-	});
-	useSyncFormValues(form, colors);
-
-	const handleAutoSave = () => {
-		persist(form.state.values);
-	};
+	const form = useColorSectionForm(colors, persist);
 
 	return (
 		<form
@@ -76,7 +86,6 @@ function ColorSectionForm() {
 								active={color === field.state.value}
 								onSelect={(color) => {
 									field.handleChange(color as string);
-									handleAutoSave();
 								}}
 							/>
 						))}
@@ -84,105 +93,50 @@ function ColorSectionForm() {
 				)}
 			</form.Field>
 
-			<form.Field name="primary">
-				{(field) => (
-					<FormItem hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}>
-						<FormLabel>
-							<Trans>Primary Color</Trans>
-						</FormLabel>
-						<div className="flex items-center gap-3">
-							<ColorPicker
-								value={field.state.value}
-								onChange={(color) => {
-									field.handleChange(color);
-									handleAutoSave();
-								}}
-							/>
-							<FormControl
-								render={
-									<Input
-										name={field.name}
-										value={field.state.value}
-										onBlur={field.handleBlur}
-										onChange={(e) => {
-											field.handleChange(e.target.value);
-											handleAutoSave();
-										}}
-									/>
-								}
-							/>
-						</div>
-						<FormMessage errors={field.state.meta.errors} />
-					</FormItem>
-				)}
-			</form.Field>
-
-			<form.Field name="text">
-				{(field) => (
-					<FormItem hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}>
-						<FormLabel>
-							<Trans>Text Color</Trans>
-						</FormLabel>
-						<div className="flex items-center gap-3">
-							<ColorPicker
-								defaultValue={field.state.value}
-								onChange={(color) => {
-									field.handleChange(color);
-									handleAutoSave();
-								}}
-							/>
-							<FormControl
-								render={
-									<Input
-										name={field.name}
-										value={field.state.value}
-										onBlur={field.handleBlur}
-										onChange={(e) => {
-											field.handleChange(e.target.value);
-											handleAutoSave();
-										}}
-									/>
-								}
-							/>
-						</div>
-						<FormMessage errors={field.state.meta.errors} />
-					</FormItem>
-				)}
-			</form.Field>
-
-			<form.Field name="background">
-				{(field) => (
-					<FormItem hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}>
-						<FormLabel>
-							<Trans>Background Color</Trans>
-						</FormLabel>
-						<div className="flex items-center gap-3">
-							<ColorPicker
-								defaultValue={field.state.value}
-								onChange={(color) => {
-									field.handleChange(color);
-									handleAutoSave();
-								}}
-							/>
-							<FormControl
-								render={
-									<Input
-										name={field.name}
-										value={field.state.value}
-										onBlur={field.handleBlur}
-										onChange={(e) => {
-											field.handleChange(e.target.value);
-											handleAutoSave();
-										}}
-									/>
-								}
-							/>
-						</div>
-						<FormMessage errors={field.state.meta.errors} />
-					</FormItem>
-				)}
-			</form.Field>
+			<ColorFormField form={form} name="primary" label={<Trans>Primary Color</Trans>} controlled />
+			<ColorFormField form={form} name="text" label={<Trans>Text Color</Trans>} />
+			<ColorFormField form={form} name="background" label={<Trans>Background Color</Trans>} />
 		</form>
+	);
+}
+
+type ColorFormFieldProps = {
+	form: ColorSectionForm;
+	name: keyof ColorValues;
+	label: ReactNode;
+	controlled?: boolean;
+};
+
+function ColorFormField({ form, name, label, controlled }: ColorFormFieldProps) {
+	return (
+		<form.Field name={name}>
+			{(field) => (
+				<FormItem hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}>
+					<FormLabel>{label}</FormLabel>
+					<div className="flex items-center gap-3">
+						<ColorPicker
+							{...(controlled ? { value: field.state.value } : { defaultValue: field.state.value })}
+							onChange={(color) => {
+								field.handleChange(color);
+							}}
+						/>
+						<FormControl
+							render={
+								<Input
+									name={field.name}
+									value={field.state.value}
+									onBlur={field.handleBlur}
+									onChange={(e) => {
+										field.handleChange(e.target.value);
+									}}
+								/>
+							}
+						/>
+					</div>
+					<FormMessage errors={field.state.meta.errors} />
+				</FormItem>
+			)}
+		</form.Field>
 	);
 }
 
@@ -221,26 +175,27 @@ function QuickColorCircle({ color, active, onSelect, className, ...props }: Quic
 	return (
 		<button
 			type="button"
+			aria-label={t`Use color ${color}`}
 			onClick={() => onSelect(color)}
 			className={cn(
 				"relative flex size-8 items-center justify-center rounded-md bg-transparent",
-				"scale-100 transition-transform hover:scale-120 hover:bg-secondary/80 active:scale-95",
+				"transition-[scale,background-color] duration-quick ease-enter hover:bg-sunken/80 active:scale-[0.97]",
 				className,
 			)}
 			{...props}
 		>
 			<div style={{ backgroundColor: color }} className="size-6 shrink-0 rounded-md" />
 
-			<AnimatePresence>
+			<AnimatePresence initial={false}>
 				{active && (
 					<m.div
 						initial={{ scale: 0.95, opacity: 0 }}
 						animate={{ scale: 1, opacity: 1 }}
 						exit={{ scale: 0.95, opacity: 0 }}
-						transition={{ duration: 0.16, ease: "easeOut" }}
-						className="absolute inset-0 flex size-8 items-center justify-center will-change-transform"
+						transition={{ duration: D1, ease: EASE }}
+						className="absolute inset-0 flex size-8 items-center justify-center"
 					>
-						<div className="size-4 rounded-md bg-foreground" />
+						<div className="size-4 rounded-md bg-ink" />
 					</m.div>
 				)}
 			</AnimatePresence>
@@ -266,24 +221,21 @@ function LevelSectionForm() {
 	const form = useAppForm({
 		defaultValues: levelDesign,
 		validators: { onChange: levelDesignSchema },
+		listeners: {
+			onChange: ({ formApi }) => {
+				persist(formApi.state.values);
+			},
+		},
 		onSubmit: ({ value }) => {
 			persist(value);
 		},
 	});
 	useSyncFormValues(form, levelDesign);
 
-	const handleAutoSave = () => {
-		persist(form.state.values);
-	};
-
-	const previewType = useStore(form.store, (s) => s.values.type);
-	const previewIcon = useStore(form.store, (s) => s.values.icon);
-	const iconFontSize = resolveStyleRuleFontSize(resume.data, { slot: "icon" });
-	const levelFontSize = resolveStyleRuleFontSize(resume.data, { slot: "level" });
+	const previewType = useSelector(form.store, (s) => s.values.type);
+	const previewIcon = useSelector(form.store, (s) => s.values.icon);
 	const { decorationSize, levelIconExplicitSize } = resolveLevelDisplaySizes({
 		bodyFontSize: resume.data.metadata.typography.body.fontSize,
-		iconFontSize,
-		levelFontSize,
 	});
 
 	return (
@@ -295,7 +247,7 @@ function LevelSectionForm() {
 				void form.handleSubmit();
 			}}
 		>
-			<h4 className="font-semibold text-lg leading-none tracking-tight">
+			<h4 className="text-lg leading-none font-semibold tracking-tight">
 				<Trans>Level</Trans>
 			</h4>
 
@@ -327,7 +279,6 @@ function LevelSectionForm() {
 										value={field.state.value}
 										onChange={(value) => {
 											field.handleChange(value);
-											handleAutoSave();
 										}}
 									/>
 								}
@@ -349,7 +300,6 @@ function LevelSectionForm() {
 										onValueChange={(value) => {
 											if (!value) return;
 											field.handleChange(value as LevelType);
-											handleAutoSave();
 										}}
 									/>
 								}

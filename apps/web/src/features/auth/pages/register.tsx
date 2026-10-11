@@ -1,21 +1,27 @@
 import { t } from "@lingui/core/macro";
 import { Trans } from "@lingui/react/macro";
-import { ArrowRightIcon, EyeIcon, EyeSlashIcon } from "@phosphor-icons/react";
-import { Link } from "@tanstack/react-router";
+import { useSelector } from "@tanstack/react-form";
+import { useQueryClient } from "@tanstack/react-query";
+import { Link, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
-import { toast } from "sonner";
-import { useToggle } from "usehooks-ts";
 import z from "zod";
 import { Alert, AlertDescription, AlertTitle } from "@reactive-resume/ui/components/alert";
 import { Button } from "@reactive-resume/ui/components/button";
 import { FormControl, FormItem, FormLabel, FormMessage } from "@reactive-resume/ui/components/form";
+import { Icon } from "@reactive-resume/ui/components/icon";
 import { Input } from "@reactive-resume/ui/components/input";
-import { authClient } from "@/libs/auth/client";
-import { useAppForm } from "@/libs/tanstack-form";
+import { toast } from "@reactive-resume/ui/components/toast";
+import { cn } from "@reactive-resume/utils/style";
 import { SocialAuth } from "../components/social-auth";
+import { getAuthRedirectOptions, getOAuthSignInOptions, isOAuthRedirect } from "../redirect";
+import { PasswordInput } from "@/components/input/password-input";
+import { authClient } from "@/libs/auth/client";
+import { ENTER_CLASS } from "@/libs/motion";
+import { sessionQueryKey } from "@/libs/root-context";
+import { useAppForm } from "@/libs/tanstack-form";
 
 const formSchema = z.object({
-	name: z.string().min(3).max(64),
+	name: z.string().trim().min(1).max(64),
 	username: z
 		.string()
 		.min(3)
@@ -26,7 +32,7 @@ const formSchema = z.object({
 			message: "Username can only contain lowercase letters, numbers, dots, hyphens and underscores.",
 		}),
 	email: z.email().toLowerCase(),
-	password: z.string().min(6).max(64),
+	password: z.string().min(8).max(64),
 });
 
 type Props = {
@@ -34,51 +40,69 @@ type Props = {
 };
 
 export function RegisterPage({ disableEmailAuth }: Props) {
+	const { callbackURL, reauthenticate } = useSearch({ from: "/auth" });
+	const queryClient = useQueryClient();
 	const [submitted, setSubmitted] = useState(false);
-	const [showPassword, toggleShowPassword] = useToggle(false);
 
 	const form = useAppForm({
 		defaultValues: { name: "", username: "", email: "", password: "" },
 		validators: { onSubmit: formSchema },
 		onSubmit: async ({ value }) => {
-			const toastId = toast.loading(t`Signing up...`);
+			const toastId = toast.add({ type: "loading", description: t`Signing up...` });
 
-			const { error } = await authClient.signUp.email({
-				name: value.name,
+			const oauthOptions = getOAuthSignInOptions(callbackURL);
+			const createPrompt = new URLSearchParams(oauthOptions.oauth_query).get("prompt")?.split(" ").includes("create");
+			const { data, error } = await authClient.signUp.email({
+				name: value.name.trim(),
 				email: value.email,
 				password: value.password,
 				username: value.username,
 				displayUsername: value.username,
-				callbackURL: "/dashboard",
+				callbackURL: callbackURL ?? "/dashboard",
+				...(!createPrompt ? oauthOptions : {}),
 			});
 
 			if (error) {
-				toast.error(
-					error.message ||
+				toast.add({
+					type: "error",
+					description:
+						error.message ||
 						t({
 							comment: "Fallback toast when account registration fails without a server error message",
 							message: "Failed to create your account. Please try again.",
 						}),
-					{ id: toastId },
-				);
+					id: toastId,
+				});
 				return;
 			}
 
+			if (isOAuthRedirect(data)) return;
+			if (createPrompt && oauthOptions.oauth_query) {
+				const continuation = await authClient.oauth2.continue({ created: true, oauth_query: oauthOptions.oauth_query });
+				if (continuation.error) {
+					toast.add({ type: "error", description: continuation.error.message, id: toastId });
+					return;
+				}
+				if (isOAuthRedirect(continuation.data)) return;
+			}
+			await queryClient.invalidateQueries({ queryKey: sessionQueryKey });
 			setSubmitted(true);
-			toast.dismiss(toastId);
+			toast.close(toastId);
 		},
 	});
+
+	const isSubmitting = useSelector(form.store, (state) => state.isSubmitting);
 
 	if (submitted) return <PostSignupScreen />;
 
 	return (
 		<>
 			<div className="space-y-1 text-center">
-				<h1 className="font-semibold text-2xl tracking-tight">
+				<h1 className="text-2xl font-semibold tracking-tight">
 					<Trans>Create a new account</Trans>
 				</h1>
 
-				<div className="text-muted-foreground">
+				<div className="text-ink-3">
 					<Trans>
 						Already have an account?{" "}
 						<Button
@@ -86,9 +110,9 @@ export function RegisterPage({ disableEmailAuth }: Props) {
 							nativeButton={false}
 							className="h-auto gap-1.5 px-1! py-0"
 							render={
-								<Link to="/auth/login">
+								<Link to="/auth/login" search={{ callbackURL, reauthenticate }}>
 									<Trans comment="Call-to-action link from registration page to login page">Sign in now</Trans>{" "}
-									<ArrowRightIcon />
+									<Icon name="arrow-right" size={16} />
 								</Link>
 							}
 						/>
@@ -114,8 +138,8 @@ export function RegisterPage({ disableEmailAuth }: Props) {
 								<FormControl
 									render={
 										<Input
-											min={3}
-											max={64}
+											minLength={1}
+											maxLength={64}
 											autoComplete="section-register name"
 											placeholder={t({
 												comment: "Example full name placeholder on registration form",
@@ -142,8 +166,8 @@ export function RegisterPage({ disableEmailAuth }: Props) {
 								<FormControl
 									render={
 										<Input
-											min={3}
-											max={64}
+											minLength={3}
+											maxLength={64}
 											autoComplete="section-register username"
 											placeholder={t({
 												comment: "Example username placeholder on registration form",
@@ -173,10 +197,7 @@ export function RegisterPage({ disableEmailAuth }: Props) {
 										<Input
 											type="email"
 											autoComplete="section-register email"
-											placeholder={t({
-												comment: "Example email placeholder on registration form",
-												message: "john.doe@example.com",
-											})}
+											placeholder="john.doe@example.com"
 											className="lowercase"
 											name={field.name}
 											value={field.state.value}
@@ -196,65 +217,46 @@ export function RegisterPage({ disableEmailAuth }: Props) {
 								<FormLabel>
 									<Trans comment="Label for password input on registration form">Password</Trans>
 								</FormLabel>
-								<div className="flex items-center gap-x-1.5">
-									<FormControl
-										render={
-											<Input
-												min={6}
-												max={64}
-												type={showPassword ? "text" : "password"}
-												autoComplete="section-register new-password"
-												name={field.name}
-												value={field.state.value}
-												onBlur={field.handleBlur}
-												onChange={(event) => field.handleChange(event.target.value)}
-											/>
-										}
-									/>
-
-									<Button
-										size="icon"
-										variant="ghost"
-										onClick={toggleShowPassword}
-										aria-label={
-											showPassword
-												? t({
-														comment: "Accessible label for button that hides password in registration form",
-														message: "Hide password",
-													})
-												: t({
-														comment: "Accessible label for button that reveals password in registration form",
-														message: "Show password",
-													})
-										}
-									>
-										{showPassword ? <EyeIcon /> : <EyeSlashIcon />}
-									</Button>
-								</div>
+								<FormControl
+									render={
+										<PasswordInput
+											minLength={8}
+											maxLength={64}
+											autoComplete="section-register new-password"
+											name={field.name}
+											value={field.state.value}
+											onBlur={field.handleBlur}
+											onChange={(event) => field.handleChange(event.target.value)}
+										/>
+									}
+								/>
 								<FormMessage errors={field.state.meta.errors} />
 							</FormItem>
 						)}
 					</form.Field>
 
-					<Button type="submit" className="w-full">
+					<Button type="submit" className="w-full" disabled={isSubmitting}>
 						<Trans comment="Primary action button label on registration form">Sign up</Trans>
 					</Button>
 				</form>
 			)}
 
-			<SocialAuth requestSignUp />
+			<SocialAuth />
 		</>
 	);
 }
 
 function PostSignupScreen() {
+	const { callbackURL } = useSearch({ from: "/auth" });
+	const redirectOptions = getAuthRedirectOptions(callbackURL);
 	return (
-		<>
+		// Replaces the form in place: fades up into the auth column, with the layout's 24px gap.
+		<div className={cn(ENTER_CLASS, "grid gap-y-6")}>
 			<div className="space-y-1 text-center">
-				<h1 className="font-semibold text-2xl tracking-tight">
+				<h1 className="text-2xl font-semibold tracking-tight">
 					<Trans>You've got mail!</Trans>
 				</h1>
-				<p className="text-muted-foreground">
+				<p className="text-ink-3">
 					<Trans>Check your email for a link to verify your account.</Trans>
 				</p>
 			</div>
@@ -264,19 +266,19 @@ function PostSignupScreen() {
 					<Trans>This step is optional, but recommended.</Trans>
 				</AlertTitle>
 				<AlertDescription>
-					<Trans>Verifying your email is required when resetting your password.</Trans>
+					<Trans>Verifying your email confirms that you own this address.</Trans>
 				</AlertDescription>
 			</Alert>
 
 			<Button
 				nativeButton={false}
 				render={
-					<Link to="/dashboard">
+					<Link to={redirectOptions.href} reloadDocument={redirectOptions.reloadDocument} replace>
 						<Trans comment="Button label to continue to dashboard after successful registration">Continue</Trans>{" "}
-						<ArrowRightIcon />
+						<Icon name="arrow-right" size={16} />
 					</Link>
 				}
 			/>
-		</>
+		</div>
 	);
 }

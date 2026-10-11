@@ -1,47 +1,33 @@
-import type { SectionTitleResolver } from "./section-title";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { sampleResumeData } from "@reactive-resume/schema/resume/sample";
 
 const rendererMock = vi.hoisted(() => ({
-	pdf: vi.fn(() => ({
-		toBlob: vi.fn(async () => new Blob(["%PDF"], { type: "application/pdf" })),
+	renderResume: vi.fn(async () => ({
+		pdf: new TextEncoder().encode("%PDF"),
+		pageMap: { pages: [], nodes: [] },
+		layout: { pages: [] },
+		missingFonts: [] as string[],
+		warnings: [],
 	})),
 }));
 
-vi.mock("@react-pdf/renderer", async (importOriginal) => ({
-	...(await importOriginal<typeof import("@react-pdf/renderer")>()),
-	pdf: rendererMock.pdf,
+vi.mock("./forme/render", async (importOriginal) => ({
+	...(await importOriginal<typeof import("./forme/render")>()),
+	renderResume: rendererMock.renderResume,
 }));
-
-vi.mock("./document", () => ({
-	ResumeDocument: () => null,
-}));
+vi.mock("@formepdf/core/worker", () => ({ init: vi.fn(async () => {}), renderSerializedDocWithLayout: vi.fn() }));
 
 describe("createResumePdfBlob", () => {
-	beforeEach(() => {
-		rendererMock.pdf.mockClear();
-	});
-
-	it("renders ResumeDocument with data, template, and section title resolver", async () => {
-		const resolveSectionTitle: SectionTitleResolver = (input) => input.defaultEnglishTitle ?? input.sectionId;
+	it("rejects when a font can't be downloaded, so callers fall back to the server's PDF", async () => {
+		rendererMock.renderResume.mockResolvedValueOnce({
+			pdf: new TextEncoder().encode("%PDF"),
+			pageMap: { pages: [], nodes: [] },
+			layout: { pages: [] },
+			missingFonts: ["Source Sans 3"],
+			warnings: [],
+		});
 		const { createResumePdfBlob } = await import("./browser");
 
-		const blob = await createResumePdfBlob({
-			data: sampleResumeData,
-			template: "azurill",
-			resolveSectionTitle,
-		});
-
-		expect(blob.type).toBe("application/pdf");
-		expect(rendererMock.pdf).toHaveBeenCalledTimes(1);
-		expect(rendererMock.pdf).toHaveBeenCalledWith(
-			expect.objectContaining({
-				props: {
-					data: sampleResumeData,
-					template: "azurill",
-					resolveSectionTitle,
-				},
-			}),
-		);
+		await expect(createResumePdfBlob({ data: sampleResumeData })).rejects.toThrow("Source Sans 3");
 	});
 });

@@ -1,12 +1,11 @@
 import type { DialogProps } from "../store";
 import { t } from "@lingui/core/macro";
 import { Trans } from "@lingui/react/macro";
-import { EyeIcon, EyeSlashIcon, PasswordIcon } from "@phosphor-icons/react";
+import { useSelector } from "@tanstack/react-form";
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { useToggle } from "usehooks-ts";
 import z from "zod";
 import { Button } from "@reactive-resume/ui/components/button";
+import { Checkbox } from "@reactive-resume/ui/components/checkbox";
 import {
 	DialogContent,
 	DialogDescription,
@@ -15,17 +14,20 @@ import {
 	DialogTitle,
 } from "@reactive-resume/ui/components/dialog";
 import { FormControl, FormItem, FormLabel, FormMessage } from "@reactive-resume/ui/components/form";
-import { Input } from "@reactive-resume/ui/components/input";
+import { Icon } from "@reactive-resume/ui/components/icon";
+import { toast } from "@reactive-resume/ui/components/toast";
+import { useDialogStore } from "../store";
+import { PasswordInput } from "@/components/input/password-input";
 import { useFormBlocker } from "@/hooks/use-form-blocker";
 import { authClient } from "@/libs/auth/client";
 import { getReadableErrorMessage } from "@/libs/error-message";
 import { useAppForm } from "@/libs/tanstack-form";
-import { useDialogStore } from "../store";
 
 const formSchema = z
 	.object({
 		currentPassword: z.string().min(6).max(64),
-		newPassword: z.string().min(6).max(64),
+		newPassword: z.string().min(8).max(64),
+		revokeOtherSessions: z.boolean(),
 	})
 	.refine((data) => data.newPassword !== data.currentPassword, {
 		message: "New password cannot be the same as the current password.",
@@ -36,44 +38,46 @@ export function ChangePasswordDialog(_: DialogProps<"auth.change-password">) {
 	const queryClient = useQueryClient();
 	const closeDialog = useDialogStore((state) => state.closeDialog);
 
-	const [showCurrentPassword, toggleShowCurrentPassword] = useToggle(false);
-	const [showNewPassword, toggleShowNewPassword] = useToggle(false);
-
 	const form = useAppForm({
 		defaultValues: {
 			currentPassword: "",
 			newPassword: "",
+			revokeOtherSessions: false,
 		},
 		validators: {
 			onSubmit: formSchema,
 		},
 		onSubmit: async ({ value }) => {
-			const toastId = toast.loading(t`Updating your password...`);
+			const toastId = toast.add({ type: "loading", description: t`Updating your password...` });
 
 			const { error } = await authClient.changePassword({
 				currentPassword: value.currentPassword,
 				newPassword: value.newPassword,
+				revokeOtherSessions: value.revokeOtherSessions,
 			});
 
 			if (error) {
-				toast.error(
-					getReadableErrorMessage(
+				toast.add({
+					type: "error",
+					description: getReadableErrorMessage(
 						error,
 						t({
 							comment: "Fallback toast when changing account password fails",
 							message: "Failed to update your password. Please try again.",
 						}),
 					),
-					{ id: toastId },
-				);
+					id: toastId,
+				});
 				return;
 			}
 
-			toast.success(t`Your password has been updated successfully.`, { id: toastId });
+			toast.add({ type: "success", description: t`Your password has been updated.`, id: toastId });
 			void queryClient.invalidateQueries({ queryKey: ["auth", "accounts"] });
 			closeDialog();
 		},
 	});
+
+	const isSubmitting = useSelector(form.store, (state) => state.isSubmitting);
 
 	useFormBlocker(form);
 
@@ -81,7 +85,7 @@ export function ChangePasswordDialog(_: DialogProps<"auth.change-password">) {
 		<DialogContent>
 			<DialogHeader>
 				<DialogTitle className="flex items-center gap-x-2">
-					<PasswordIcon />
+					<Icon name="password" size={16} />
 					<Trans>Update your password</Trans>
 				</DialogTitle>
 				<DialogDescription>
@@ -103,37 +107,19 @@ export function ChangePasswordDialog(_: DialogProps<"auth.change-password">) {
 							<FormLabel>
 								<Trans>Current Password</Trans>
 							</FormLabel>
-							<div className="flex items-center gap-x-1.5">
-								<FormControl
-									render={
-										<Input
-											min={6}
-											max={64}
-											type={showCurrentPassword ? "text" : "password"}
-											autoComplete="current-password"
-											name={field.name}
-											value={field.state.value}
-											onBlur={field.handleBlur}
-											onChange={(event) => field.handleChange(event.target.value)}
-										/>
-									}
-								/>
-
-								<Button size="icon" variant="ghost" type="button" onClick={toggleShowCurrentPassword}>
-									<span className="sr-only">
-										{showCurrentPassword
-											? t({
-													comment: "Accessible label for toggle button that hides the visible current password",
-													message: "Hide password",
-												})
-											: t({
-													comment: "Accessible label for toggle button that reveals the masked current password",
-													message: "Show password",
-												})}
-									</span>
-									{showCurrentPassword ? <EyeIcon /> : <EyeSlashIcon />}
-								</Button>
-							</div>
+							<FormControl
+								render={
+									<PasswordInput
+										minLength={6}
+										maxLength={64}
+										autoComplete="current-password"
+										name={field.name}
+										value={field.state.value}
+										onBlur={field.handleBlur}
+										onChange={(event) => field.handleChange(event.target.value)}
+									/>
+								}
+							/>
 							<FormMessage errors={field.state.meta.errors} />
 						</FormItem>
 					)}
@@ -145,44 +131,39 @@ export function ChangePasswordDialog(_: DialogProps<"auth.change-password">) {
 							<FormLabel>
 								<Trans>New Password</Trans>
 							</FormLabel>
-							<div className="flex items-center gap-x-1.5">
-								<FormControl
-									render={
-										<Input
-											min={6}
-											max={64}
-											type={showNewPassword ? "text" : "password"}
-											autoComplete="new-password"
-											name={field.name}
-											value={field.state.value}
-											onBlur={field.handleBlur}
-											onChange={(event) => field.handleChange(event.target.value)}
-										/>
-									}
-								/>
-
-								<Button size="icon" variant="ghost" type="button" onClick={toggleShowNewPassword}>
-									<span className="sr-only">
-										{showNewPassword
-											? t({
-													comment: "Accessible label for toggle button that hides the visible new password",
-													message: "Hide password",
-												})
-											: t({
-													comment: "Accessible label for toggle button that reveals the masked new password",
-													message: "Show password",
-												})}
-									</span>
-									{showNewPassword ? <EyeIcon /> : <EyeSlashIcon />}
-								</Button>
-							</div>
+							<FormControl
+								render={
+									<PasswordInput
+										minLength={8}
+										maxLength={64}
+										autoComplete="new-password"
+										name={field.name}
+										value={field.state.value}
+										onBlur={field.handleBlur}
+										onChange={(event) => field.handleChange(event.target.value)}
+									/>
+								}
+							/>
 							<FormMessage errors={field.state.meta.errors} />
 						</FormItem>
 					)}
 				</form.Field>
 
+				<form.Field name="revokeOtherSessions">
+					{(field) => (
+						<FormItem className="flex items-center gap-2.5">
+							<FormControl
+								render={<Checkbox name={field.name} checked={field.state.value} onCheckedChange={field.handleChange} />}
+							/>
+							<FormLabel>
+								<Trans>Sign out from all other devices</Trans>
+							</FormLabel>
+						</FormItem>
+					)}
+				</form.Field>
+
 				<DialogFooter>
-					<Button type="submit">
+					<Button type="submit" disabled={isSubmitting}>
 						<Trans comment="Primary action button to submit changed password">Update Password</Trans>
 					</Button>
 				</DialogFooter>

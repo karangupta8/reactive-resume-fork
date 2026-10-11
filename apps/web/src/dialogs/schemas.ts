@@ -1,20 +1,33 @@
-import z from "zod";
-import { apiKeyDialogSchemas } from "./api-key/schema";
-import { authDialogSchemas } from "./auth/schema";
-import { resumeDialogSchemas } from "./resume/schema";
+import type { NewDocumentDialogData } from "@/features/documents/new-document-dialog";
+import type { ReactNode } from "react";
 
-export const dialogSchemaRegistries = [
-	{ domain: "auth", schemas: authDialogSchemas },
-	{ domain: "api-key", schemas: apiKeyDialogSchemas },
-	{ domain: "resume", schemas: resumeDialogSchemas },
-] as const;
+type EmptyDialog<T extends string> = { [K in T]: { type: K; data?: undefined } }[T];
 
-const dialogSchemaEntries = [...authDialogSchemas, ...apiKeyDialogSchemas, ...resumeDialogSchemas] as const;
+export type DialogSchema =
+	| EmptyDialog<"auth.change-password" | "auth.two-factor.enable" | "auth.two-factor.disable">
+	| {
+			type: "document.new";
+			data?: NewDocumentDialogData | undefined;
+	  }
+	| {
+			type: "resume.update";
+			data: { id: string; name: string; slug: string; tags: string[] };
+	  }
+	| {
+			type: "resume.duplicate";
+			data: { id: string; name: string; slug: string; tags: string[] };
+	  };
 
-export const dialogTypeSchema = z.discriminatedUnion("type", dialogSchemaEntries);
-
-export type DialogSchema = z.infer<typeof dialogTypeSchema>;
 export type DialogType = DialogSchema["type"];
+
+type DialogRendererEntry<T extends DialogType = DialogType> = {
+	type: T;
+	render: (dialog: Extract<DialogSchema, { type: T }>) => ReactNode;
+};
+
+export type AnyDialogRendererEntry = {
+	[T in DialogType]: DialogRendererEntry<T>;
+}[DialogType];
 
 export type DialogData<T extends DialogType> = Extract<DialogSchema, { type: T }>["data"];
 

@@ -1,5 +1,6 @@
 import z from "zod";
 import { protectedProcedure } from "../../context";
+import { paginate, paginationShape } from "../../pagination";
 import { resumeService } from "./service";
 
 export const tagsRouter = {
@@ -15,7 +16,8 @@ export const tagsRouter = {
 			successDescription: "A sorted array of unique tag strings.",
 		})
 		.output(z.array(z.string()))
-		.handler(async ({ context }) => {
-			return resumeService.tags.list({ userId: context.user.id });
-		}),
+		.input(z.object(paginationShape).default({}))
+		.handler(async ({ context, input }) =>
+			paginate(await resumeService.tags.list({ userId: context.user.id }), input, context.resHeaders),
+		),
 };

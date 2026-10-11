@@ -1,5 +1,7 @@
-import type { IShadingAttributesProperties, ISpacingProperties } from "docx";
+import type { IShadingAttributesProperties } from "docx";
+import type { HTMLElement, Node } from "node-html-parser";
 import { ExternalHyperlink, HeadingLevel, Paragraph, TextRun } from "docx";
+import { parse, NodeType } from "node-html-parser";
 import { isDarkColor, parseColorString } from "@reactive-resume/utils/color";
 import { toSafeDocxLink } from "./link-utils";
 
@@ -22,7 +24,16 @@ interface InlineStyle {
 }
 
 type InlineChild = TextRun | ExternalHyperlink;
-type NumberingOptions = { reference: string; level: number; instance?: number };
+
+const preservesWhitespace = (node: Node) => {
+	let ancestor = node.parentNode;
+	while (ancestor) {
+		if (/^(P|H[1-6])$/.test(ancestor.tagName) && ancestor.getAttribute("data-resume-whitespace") === "preserve")
+			return true;
+		ancestor = ancestor.parentNode;
+	}
+	return false;
+};
 
 /** Module-level link color, set per htmlToParagraphs invocation. */
 let currentLinkColor = "0563C1";
@@ -41,6 +52,18 @@ function toDocxColorValue(value: string) {
 	if (!rgba) return null;
 
 	return [rgba.r, rgba.g, rgba.b].map((channel) => channel.toString(16).padStart(2, "0").toUpperCase()).join("");
+}
+
+function styleProperty(element: HTMLElement | undefined, property: string): string | undefined {
+	return element
+		?.getAttribute("style")
+		?.split(";")
+		.reverse()
+		.map((declaration) => {
+			const colon = declaration.indexOf(":");
+			return [declaration.slice(0, colon).trim().toLowerCase(), declaration.slice(colon + 1).trim()];
+		})
+		.find(([name]) => name === property)?.[1];
 }
 
 function mergeStyle(parent: InlineStyle, tag: string, element?: HTMLElement): InlineStyle {
@@ -66,7 +89,7 @@ function mergeStyle(parent: InlineStyle, tag: string, element?: HTMLElement): In
 			next.font = "Courier New";
 			break;
 		case "MARK": {
-			const bgColor = (element as HTMLElement | undefined)?.style.backgroundColor;
+			const bgColor = styleProperty(element, "background-color");
 			const fill = bgColor ? toDocxColorValue(bgColor) : null;
 			next.shading = { fill: fill ?? "FFFF00" };
 			if (bgColor && isDarkColor(bgColor)) next.color = "FFFFFF";
@@ -74,7 +97,7 @@ function mergeStyle(parent: InlineStyle, tag: string, element?: HTMLElement): In
 		}
 	}
 
-	const colorValue = (element as HTMLElement | undefined)?.style.color;
+	const colorValue = styleProperty(element, "color");
 	if (colorValue) {
 		const color = toDocxColorValue(colorValue);
 		if (color) next.color = color;
@@ -87,15 +110,15 @@ function collectInlineChildren(node: Node, style: InlineStyle): InlineChild[] {
 	const children: InlineChild[] = [];
 
 	for (const child of node.childNodes) {
-		if (child.nodeType === Node.TEXT_NODE) {
-			const text = child.textContent ?? "";
+		if (child.nodeType === NodeType.TEXT_NODE) {
+			const text = (child.textContent ?? "").replace(/\t/g, preservesWhitespace(child) ? "    " : "\t");
 			if (text) {
 				children.push(new TextRun({ text, ...style }));
 			}
 			continue;
 		}
 
-		if (child.nodeType !== Node.ELEMENT_NODE) continue;
+		if (child.nodeType !== NodeType.ELEMENT_NODE) continue;
 
 		const el = child as HTMLElement;
 		const tag = el.tagName;
@@ -123,25 +146,27 @@ function collectInlineChildren(node: Node, style: InlineStyle): InlineChild[] {
 	return children;
 }
 
-function getNumberingOptions(reference: string, level: number, instance?: number): NumberingOptions {
-	return instance === undefined ? { reference, level } : { reference, level, instance };
-}
-
 function processBlockElement(
 	el: HTMLElement,
 	style: InlineStyle,
 	paragraphs: Paragraph[],
 	listLevel?: number,
-	numberingRef?: string,
-	listIndex?: number,
+	quoteIndent = 0,
 ): void {
 	const tag = el.tagName;
 	const mergedStyle = mergeStyle(style, tag, el);
+	const level = Number(el.getAttribute("data-indent"));
+	// 24 CSS px = 18 pt = 360 twips. Lists retain their existing numbering indentation.
+	const paragraphIndent = listLevel == null && Number.isInteger(level) && level > 0 && level <= 8 ? level * 360 : 0;
+	const start = quoteIndent + paragraphIndent;
+	const indent = start ? { start } : undefined;
 
 	if (HEADING_MAP[tag]) {
 		const inlineChildren = collectInlineChildren(el, mergedStyle);
 		if (inlineChildren.length > 0) {
-			paragraphs.push(new Paragraph({ heading: HEADING_MAP[tag], children: inlineChildren }));
+			paragraphs.push(
+				new Paragraph({ heading: HEADING_MAP[tag], children: inlineChildren, ...(indent ? { indent } : {}) }),
+			);
 		}
 		return;
 	}
@@ -152,9 +177,7 @@ function processBlockElement(
 			paragraphs.push(
 				new Paragraph({
 					children: inlineChildren,
-					...(listLevel != null && numberingRef
-						? { numbering: getNumberingOptions(numberingRef, listLevel, listIndex) }
-						: {}),
+					...(tag === "P" && indent ? { indent } : quoteIndent ? { indent: { start: quoteIndent } } : {}),
 				}),
 			);
 		}
@@ -162,8 +185,9 @@ function processBlockElement(
 	}
 
 	if (tag === "UL" || tag === "OL") {
-		const isOrdered = tag === "OL";
+		// ponytail: ordered-list numbering (numberingRef path) was never reachable; always uses bullet
 		const level = listLevel != null ? listLevel + 1 : 0;
+		const listIndent = quoteIndent ? { start: (level + 1) * 720 + quoteIndent } : undefined;
 
 		for (const li of el.children) {
 			if (li.tagName !== "LI") continue;
@@ -174,20 +198,19 @@ function processBlockElement(
 
 			if (hasNestedBlocks) {
 				for (const liChild of li.childNodes) {
-					if (liChild.nodeType === Node.TEXT_NODE) {
+					if (liChild.nodeType === NodeType.TEXT_NODE) {
 						const text = (liChild.textContent ?? "").trim();
 						if (text) {
 							paragraphs.push(
 								new Paragraph({
 									children: [new TextRun({ text, ...mergedStyle })],
-									...(isOrdered && numberingRef
-										? { numbering: getNumberingOptions(numberingRef, level, listIndex) }
-										: { bullet: { level } }),
+									bullet: { level },
+									...(listIndent ? { indent: listIndent } : {}),
 								}),
 							);
 						}
-					} else if (liChild.nodeType === Node.ELEMENT_NODE) {
-						processBlockElement(liChild as HTMLElement, mergedStyle, paragraphs, level, numberingRef, listIndex);
+					} else if (liChild.nodeType === NodeType.ELEMENT_NODE) {
+						processBlockElement(liChild as HTMLElement, mergedStyle, paragraphs, level, quoteIndent);
 					}
 				}
 			} else {
@@ -196,9 +219,8 @@ function processBlockElement(
 					paragraphs.push(
 						new Paragraph({
 							children: inlineChildren,
-							...(isOrdered && numberingRef
-								? { numbering: getNumberingOptions(numberingRef, level, listIndex) }
-								: { bullet: { level } }),
+							bullet: { level },
+							...(listIndent ? { indent: listIndent } : {}),
 						}),
 					);
 				}
@@ -208,17 +230,29 @@ function processBlockElement(
 	}
 
 	if (tag === "BLOCKQUOTE") {
-		const indent: ISpacingProperties = {};
-		const inlineChildren = collectInlineChildren(el, { ...mergedStyle, italics: true });
-		if (inlineChildren.length > 0) {
-			paragraphs.push(
-				new Paragraph({
-					children: inlineChildren,
-					indent: { left: 720 },
-					spacing: indent,
-				}),
-			);
+		const quoteStyle = { ...mergedStyle, italics: true };
+		const inline = parse("<p></p>").firstChild as HTMLElement;
+		const flushInline = () => {
+			if (inline.childNodes.length === 0) return;
+			processBlockElement(inline, quoteStyle, paragraphs, listLevel, quoteIndent + 720);
+			inline.set_content([]);
+		};
+		// Keep each semantic paragraph's own offset and preserve adjacent inline
+		// content as one paragraph. Nested quotes add their existing 720-twip inset.
+		for (const child of el.childNodes) {
+			if (child.nodeType === NodeType.ELEMENT_NODE) {
+				const element = child as HTMLElement;
+				if (HEADING_MAP[element.tagName] || /^(P|DIV|UL|OL|BLOCKQUOTE|PRE|HR)$/.test(element.tagName)) {
+					flushInline();
+					processBlockElement(element, quoteStyle, paragraphs, listLevel, quoteIndent + 720);
+					continue;
+				}
+			}
+			if (child.nodeType === NodeType.TEXT_NODE && !child.textContent?.trim() && inline.childNodes.length === 0)
+				continue;
+			inline.appendChild(child.clone());
 		}
+		flushInline();
 		return;
 	}
 
@@ -228,6 +262,7 @@ function processBlockElement(
 			paragraphs.push(
 				new Paragraph({
 					children: [new TextRun({ text, font: "Courier New", ...mergedStyle })],
+					...(quoteIndent ? { indent: { start: quoteIndent } } : {}),
 				}),
 			);
 		}
@@ -261,7 +296,7 @@ function processBlockElement(
 
 /**
  * Converts an HTML string (from TipTap rich text editor) into an array of docx Paragraphs.
- * Uses the browser's DOMParser to parse HTML, then walks the DOM tree to produce
+ * Parses HTML without browser globals, then walks the tree to produce
  * structured docx content with proper formatting (bold, italic, lists, links, etc.).
  *
  * @param html - The HTML string to convert
@@ -277,12 +312,13 @@ export function htmlToParagraphs(html: string, styleConfig?: HtmlStyleConfig): P
 	if (styleConfig?.size) baseStyle.size = styleConfig.size;
 	if (styleConfig?.color) baseStyle.color = styleConfig.color;
 
-	const parser = new DOMParser();
-	const doc = parser.parseFromString(html, "text/html");
+	const doc = parse(html);
+	// Script and style text is code, not content: drop it before any walk below prints it.
+	for (const element of doc.querySelectorAll("script, style")) element.remove();
 	const paragraphs: Paragraph[] = [];
 
-	for (const child of doc.body.childNodes) {
-		if (child.nodeType === Node.TEXT_NODE) {
+	for (const child of doc.childNodes) {
+		if (child.nodeType === NodeType.TEXT_NODE) {
 			const text = (child.textContent ?? "").trim();
 			if (text) {
 				paragraphs.push(new Paragraph({ children: [new TextRun({ text, ...baseStyle })] }));
@@ -290,7 +326,7 @@ export function htmlToParagraphs(html: string, styleConfig?: HtmlStyleConfig): P
 			continue;
 		}
 
-		if (child.nodeType === Node.ELEMENT_NODE) {
+		if (child.nodeType === NodeType.ELEMENT_NODE) {
 			processBlockElement(child as HTMLElement, baseStyle, paragraphs);
 		}
 	}

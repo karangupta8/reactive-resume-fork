@@ -1,4 +1,9 @@
 {
 	"extends": ["//"],
-	"tags": ["app:web"]
+	"tags": ["app:web"],
+	"tasks": {
+		"build": {
+			"outputs": ["$TURBO_EXTENDS$", "dist-prerender/**"]
+		}
+	}
 }

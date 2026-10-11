@@ -7,25 +7,21 @@ vi.mock("@reactive-resume/env/server", () => ({
 	},
 }));
 
-const { MAX_PDF_DOWNLOAD_URL_TTL_SECONDS, createResumePdfDownloadUrl, verifyResumePdfDownloadToken } = await import(
-	"./pdf-download-url"
-);
+const { createResumePdfDownloadUrl, verifyResumePdfDownloadToken } = await import("./pdf-download-url");
 
 describe("resume PDF signed download URLs", () => {
-	it("creates a URL with a token that is capped at 10 minutes", () => {
+	it("creates a URL with a token that lasts 10 minutes", () => {
 		const now = new Date("2026-06-01T10:00:00.000Z");
 
 		const result = createResumePdfDownloadUrl({
 			resumeId: "resume-1",
 			userId: "user-1",
 			now,
-			ttlSeconds: 60 * 60,
 		});
 
 		const url = new URL(result.url);
 		const token = url.searchParams.get("token");
 
-		expect(MAX_PDF_DOWNLOAD_URL_TTL_SECONDS).toBe(600);
 		expect(url.origin).toBe("https://example.com");
 		expect(url.pathname).toBe("/api/resumes/resume-1/pdf");
 		expect(token).toBeTruthy();

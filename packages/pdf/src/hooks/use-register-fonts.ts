@@ -7,25 +7,25 @@ import {
 	getPdfFallbackFontFamilies,
 	getWebFontSource,
 	isStandardPdfFontFamily,
+	resolveBoldFontWeight,
 	resolveLegacyFontAlias,
 	sortFontWeights,
 } from "@reactive-resume/fonts";
-import { isCJKLocale } from "@reactive-resume/utils/locale";
-import { Font } from "../renderer";
 
 type FontWeightRange = {
 	lowest: number;
 	highest: number;
 };
 
-const registeredFontVariants = new Set<string>();
 const fallbackFontFamily = "IBM Plex Serif";
 const cjkLetterRegex = cjkLetters().toRegExp();
 const fontWeightValues = new Set<FontWeight>(["100", "200", "300", "400", "500", "600", "700", "800", "900"]);
 const preferredFallbackFontWeights = ["400", "700", "600", "500"] satisfies FontWeight[];
 
-// `fontFamily` is widened to `string | string[]` so react-pdf can do
-// glyph-level font fallback for CJK characters (#2986).
+/** A font face the document needs: its family, weight, style and where its bytes are. */
+export type PdfFontRequest = { family: string; weight: number; italic: boolean; src: string };
+
+// `fontFamily` is widened to `string | string[]` so the engine can fall back per glyph, e.g. for CJK (#2986).
 export type PdfTypography = Omit<Typography, "body" | "heading"> & {
 	body: Omit<Typography["body"], "fontFamily"> & { fontFamily: string | string[] };
 	heading: Omit<Typography["heading"], "fontFamily"> & { fontFamily: string | string[] };
@@ -106,17 +106,6 @@ const toFontWeight = (weight: number): FontWeight => {
 	return "900";
 };
 
-const collectFontRangeWeights = (ranges: FontWeightRange[]): number[] => {
-	const weights = new Set<number>();
-
-	for (const range of ranges) {
-		weights.add(range.lowest);
-		weights.add(range.highest);
-	}
-
-	return [...weights];
-};
-
 // Resolves the user-stored family to the one we hand to Font.register:
 // direct match → legacy alias (#2989) → IBM Plex Serif fallback.
 const resolvePdfFontFamily = (family: string) => {
@@ -170,6 +159,18 @@ const arabicRegex = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-ﻼ]/;
 const hebrewRegex = /[֐-׿יִ-ﭏ]/;
 const thaiRegex = /[฀-๿]/;
 
+// Emoji: regional indicators (flags) are NOT Extended_Pictographic, so union
+// them explicitly with the pictographic property (#3321). Keycap sequences
+// (e.g. "1\uFE0F\u20E3") carry no pictographic codepoint either — their
+// discriminator is the combining enclosing keycap U+20E3, unioned here for the
+// same reason: without it, keycap-only content falls back to a font without
+// the enclosure mark and renders garbled.
+const emojiRegex = /[\u{1F1E6}-\u{1F1FF}]|\u{20E3}|\p{Extended_Pictographic}/u;
+// Geometric Shapes, Miscellaneous Symbols, Dingbats and Miscellaneous Symbols
+// and Arrows: text symbols like ★ (U+2605) that Latin fonts and Noto Emoji lack (#3581).
+// Pictographs in these blocks (☀, ✔, ⭐) are emoji and already resolve to Noto Emoji.
+const symbolsRegex = /(?!\p{Extended_Pictographic})[■-➿⬀-⯿]/u;
+
 const scriptDetectors: { script: Script; regex: RegExp }[] = [
 	{ script: "hangul", regex: hangulRegex },
 	{ script: "kana", regex: kanaRegex },
@@ -177,6 +178,8 @@ const scriptDetectors: { script: Script; regex: RegExp }[] = [
 	{ script: "arabic", regex: arabicRegex },
 	{ script: "hebrew", regex: hebrewRegex },
 	{ script: "thai", regex: thaiRegex },
+	{ script: "emoji", regex: emojiRegex },
+	{ script: "symbols", regex: symbolsRegex },
 ];
 
 const collectScripts = (value: unknown, scripts: Set<Script>): void => {
@@ -210,54 +213,46 @@ export const resumeContentScripts = (data: ResumeData): Set<Script> => {
 	return scripts;
 };
 
-export const registerFonts = (
+/**
+ * Resolves the typography for the PDF and lists the font faces it needs: the body and heading weights in normal and
+ * italic, each family's true Bold, and one Noto fallback per writing system the content uses (#2986). Standard PDF
+ * families need no files.
+ */
+export const resolvePdfFonts = (
 	typography: Typography,
 	locale: Locale,
 	hasCjkContent = false,
 	scripts?: Set<Script>,
-): PdfTypography => {
-	// CJK needs per-character line breaking. This must stay CJK-only: applying
-	// it to Arabic (cursive, joined letters) or Thai (combining marks) would
-	// break shaping, so non-CJK fallbacks below do not enable it.
-	const needsCjkLineBreaking = isCJKLocale(locale) || hasCjkContent;
-
-	Font.registerHyphenationCallback((word) => {
-		if (needsCjkLineBreaking) {
-			if (word === " ") return ["\u200C "];
-			// Only break at every character for words that contain CJK characters.
-			// Latin/non-CJK words must stay intact even in a CJK-locale resume.
-			if (cjkLetterRegex.test(word)) {
-				return [...word].flatMap((l) => [l, ""]);
-			}
-		}
-
-		return [word];
-	});
-
+): { typography: PdfTypography; fonts: PdfFontRequest[] } => {
+	const fonts = new Map<string, PdfFontRequest>();
 	const pdfTypography = resolvePdfTypography(typography);
 	const bodyFontFamily = pdfTypography.body.fontFamily;
 	const headingFontFamily = pdfTypography.heading.fontFamily;
 	const bodyRange = getFontWeightRange(pdfTypography.body.fontWeights);
 	const headingRange = getFontWeightRange(pdfTypography.heading.fontWeights);
+	// Bold styles resolve to the family's true Bold face when one exists
+	// (#3310), which can be heavier than the stored weight range (e.g.
+	// ["400", "600"] for Open Sans) — make sure that face is registered or
+	// @react-pdf/renderer would silently fall back to the nearest one.
+	const bodyBoldWeight = resolveBoldFontWeight(bodyFontFamily, pdfTypography.body.fontWeights);
 
 	const registerFont = (family: string, weight: number, italic = false) => {
 		if (isStandardPdfFontFamily(family)) return;
 
 		const normalizedWeight = toFontWeight(weight);
-		const fontStyle = italic ? "italic" : "normal";
-		const key = `${family}:${normalizedWeight}:${fontStyle}`;
-		if (registeredFontVariants.has(key)) return;
+		const key = `${family}:${normalizedWeight}:${italic}`;
+		if (fonts.has(key)) return;
 
 		const source = getWebFontSource(family, normalizedWeight, italic);
 		if (!source) return;
 
-		Font.register({ family, src: source, fontWeight: Number(normalizedWeight), fontStyle });
-		registeredFontVariants.add(key);
+		fonts.set(key, { family, weight: Number(normalizedWeight), italic, src: source });
 	};
 
 	for (const italic of [false, true]) {
 		registerFont(bodyFontFamily, bodyRange.lowest, italic);
 		registerFont(bodyFontFamily, bodyRange.highest, italic);
+		if (bodyBoldWeight) registerFont(bodyFontFamily, Number(bodyBoldWeight), italic);
 		registerFont(headingFontFamily, headingRange.lowest, italic);
 		registerFont(headingFontFamily, headingRange.highest, italic);
 	}
@@ -276,10 +271,12 @@ export const registerFonts = (
 	const bodyFallbacks = getPdfFallbackFontFamilies(bodyFontFamily, { locale, scripts: fallbackScripts });
 	const headingFallbacks = getPdfFallbackFontFamilies(headingFontFamily, { locale, scripts: fallbackScripts });
 
-	const registerFallbacks = (families: string[], ranges: FontWeightRange[]) => {
-		const weights = collectFontRangeWeights(ranges);
-
+	const registerFallbacks = (families: string[], ranges: FontWeightRange[], storedWeights: readonly string[]) => {
 		for (const family of families) {
+			const weights = new Set(ranges.flatMap(({ lowest, highest }) => [lowest, highest]));
+			const fallbackBoldWeight = resolveBoldFontWeight(family, storedWeights);
+			if (fallbackBoldWeight) weights.add(Number(fallbackBoldWeight));
+
 			for (const weight of weights) {
 				registerFont(family, weight, false);
 				registerFont(family, weight, true);
@@ -292,15 +289,15 @@ export const registerFonts = (
 		bodyFallbacks.every((family, index) => family === headingFallbacks[index]);
 
 	if (sameStack) {
-		registerFallbacks(bodyFallbacks, [bodyRange, headingRange]);
+		registerFallbacks(bodyFallbacks, [bodyRange, headingRange], pdfTypography.body.fontWeights);
 	} else {
-		registerFallbacks(bodyFallbacks, [bodyRange]);
-		registerFallbacks(headingFallbacks, [headingRange]);
+		registerFallbacks(bodyFallbacks, [bodyRange], pdfTypography.body.fontWeights);
+		registerFallbacks(headingFallbacks, [headingRange], pdfTypography.heading.fontWeights);
 	}
 
 	// Latin-only path: no fallback registered, return as-is.
 	if (bodyFallbacks.length === 0 && headingFallbacks.length === 0) {
-		return pdfTypography as PdfTypography;
+		return { typography: pdfTypography as PdfTypography, fonts: [...fonts.values()] };
 	}
 
 	const bodyStack: string | string[] = bodyFallbacks.length > 0 ? [bodyFontFamily, ...bodyFallbacks] : bodyFontFamily;
@@ -308,7 +305,11 @@ export const registerFonts = (
 		headingFallbacks.length > 0 ? [headingFontFamily, ...headingFallbacks] : headingFontFamily;
 
 	return {
-		body: { ...pdfTypography.body, fontFamily: bodyStack },
-		heading: { ...pdfTypography.heading, fontFamily: headingStack },
+		typography: {
+			...pdfTypography,
+			body: { ...pdfTypography.body, fontFamily: bodyStack },
+			heading: { ...pdfTypography.heading, fontFamily: headingStack },
+		},
+		fonts: [...fonts.values()],
 	};
 };

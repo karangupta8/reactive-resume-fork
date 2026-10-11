@@ -1,8 +1,11 @@
-import { sampleResumeData } from "@reactive-resume/schema/resume/sample";
-import { generateRandomName, slugify } from "@reactive-resume/utils/string";
+import { generateId, generateRandomName } from "@reactive-resume/utils/string";
 import { protectedProcedure } from "../../context";
 import { resumeDto } from "../../dto/resume";
 import { resumeMutationRateLimit } from "../../middleware/rate-limit";
+import { paginate } from "../../pagination";
+import { documentsService } from "../documents/service";
+import { createResumeData } from "./initial-data";
+import { parseStoredResumeData } from "./resume-data-validation";
 import { resumeService } from "./service";
 
 export const crudRouter = {
@@ -19,13 +22,17 @@ export const crudRouter = {
 		})
 		.input(resumeDto.list.input.optional().default({ tags: [], sort: "lastUpdatedAt" }))
 		.output(resumeDto.list.output)
-		.handler(async ({ input, context }) => {
-			return resumeService.list({
-				userId: context.user.id,
-				tags: input.tags,
-				sort: input.sort,
-			});
-		}),
+		.handler(async ({ input, context }) =>
+			paginate(
+				await resumeService.list({
+					userId: context.user.id,
+					tags: input.tags,
+					sort: input.sort,
+				}),
+				input,
+				context.resHeaders,
+			),
+		),
 
 	getById: protectedProcedure
 		.route({
@@ -40,9 +47,7 @@ export const crudRouter = {
 		})
 		.input(resumeDto.getById.input)
 		.output(resumeDto.getById.output)
-		.handler(async ({ context, input }) => {
-			return resumeService.getById({ id: input.id, userId: context.user.id });
-		}),
+		.handler(({ context, input }) => resumeService.getById({ id: input.id, userId: context.user.id })),
 
 	create: protectedProcedure
 		.route({
@@ -52,7 +57,7 @@ export const crudRouter = {
 			operationId: "createResume",
 			summary: "Create a new resume",
 			description:
-				"Creates a new resume with the given name, slug, and tags. Optionally initializes the resume with sample data by setting withSampleData to true. The slug must be unique across the user's resumes. Returns the ID of the newly created resume. Requires authentication.",
+				"Creates a new resume with the given name and tags. The slug (its public address) is optional: when omitted it is generated from the name and made unique across the user's resumes; when given it must be unique too. Optionally initializes the resume with sample data by setting withSampleData to true. Returns the ID of the newly created resume. Requires authentication.",
 			successDescription: "The ID of the newly created resume.",
 		})
 		.input(resumeDto.create.input)
@@ -64,16 +69,21 @@ export const crudRouter = {
 				status: 400,
 			},
 		})
-		.handler(async ({ context, input }) => {
-			return resumeService.create({
+		.handler(({ context, input }) =>
+			resumeService.create({
 				name: input.name,
-				slug: input.slug,
+				...(input.slug ? { slug: input.slug } : {}),
+				...(input.autoName ? { autoName: true } : {}),
 				tags: input.tags,
 				locale: context.locale,
 				userId: context.user.id,
-				...(input.withSampleData ? { data: sampleResumeData } : {}),
-			});
-		}),
+				data: createResumeData({
+					withSampleData: input.withSampleData,
+					name: context.user.name,
+					locale: context.locale,
+				}),
+			}),
+		),
 
 	import: protectedProcedure
 		.route({
@@ -96,17 +106,21 @@ export const crudRouter = {
 			},
 		})
 		.handler(async ({ context, input }) => {
-			const name = generateRandomName();
-			const slug = slugify(name);
+			const id = generateId();
 
-			return resumeService.create({
-				name,
-				slug,
+			// Named from the file's content (the person, else the headline) so nothing needs filling in first.
+			const name = input.data.basics.name.trim() || input.data.basics.headline.trim() || generateRandomName();
+			await resumeService.create({
+				id,
+				name: name.slice(0, 100),
 				tags: [],
 				data: input.data,
 				locale: context.locale,
 				userId: context.user.id,
+				origin: "import",
 			});
+
+			return id;
 		}),
 
 	update: protectedProcedure
@@ -124,22 +138,25 @@ export const crudRouter = {
 		.use(resumeMutationRateLimit)
 		.output(resumeDto.update.output)
 		.errors({
+			RESUME_LOCKED: { status: 403, message: "Unlock the resume first." },
 			RESUME_SLUG_ALREADY_EXISTS: {
 				message: "A resume with this slug already exists.",
 				status: 400,
 			},
 		})
-		.handler(async ({ context, input }) => {
-			return resumeService.update({
+		.handler(({ context, input }) =>
+			resumeService.update({
 				id: input.id,
 				userId: context.user.id,
 				...(input.name !== undefined ? { name: input.name } : {}),
+				...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
 				...(input.slug !== undefined ? { slug: input.slug } : {}),
 				...(input.tags !== undefined ? { tags: input.tags } : {}),
 				...(input.data !== undefined ? { data: input.data } : {}),
 				...(input.isPublic !== undefined ? { isPublic: input.isPublic } : {}),
-			});
-		}),
+				...(input.showDownloadButtons !== undefined ? { showDownloadButtons: input.showDownloadButtons } : {}),
+			}),
+		),
 
 	patch: protectedProcedure
 		.route({
@@ -156,6 +173,7 @@ export const crudRouter = {
 		.use(resumeMutationRateLimit)
 		.output(resumeDto.patch.output)
 		.errors({
+			RESUME_LOCKED: { status: 403, message: "Unlock the resume first." },
 			INVALID_PATCH_OPERATIONS: {
 				message: "The patch operations are invalid or produced an invalid resume.",
 				status: 400,
@@ -165,14 +183,14 @@ export const crudRouter = {
 				status: 409,
 			},
 		})
-		.handler(async ({ context, input }) => {
-			return resumeService.patch({
+		.handler(({ context, input }) =>
+			resumeService.patch({
 				id: input.id,
 				userId: context.user.id,
 				operations: input.operations,
 				...(input.expectedUpdatedAt ? { expectedUpdatedAt: input.expectedUpdatedAt } : {}),
-			});
-		}),
+			}),
+		),
 
 	setLocked: protectedProcedure
 		.route({
@@ -188,13 +206,13 @@ export const crudRouter = {
 		.input(resumeDto.setLocked.input)
 		.use(resumeMutationRateLimit)
 		.output(resumeDto.setLocked.output)
-		.handler(async ({ context, input }) => {
-			return resumeService.setLocked({
+		.handler(({ context, input }) =>
+			resumeService.setLocked({
 				id: input.id,
 				userId: context.user.id,
 				isLocked: input.isLocked,
-			});
-		}),
+			}),
+		),
 
 	duplicate: protectedProcedure
 		.route({
@@ -204,7 +222,7 @@ export const crudRouter = {
 			operationId: "duplicateResume",
 			summary: "Duplicate a resume",
 			description:
-				"Creates a copy of an existing resume with the same data. Optionally override the name, slug, and tags for the duplicate. If not provided, the original resume's name, slug, and tags are used. Returns the ID of the duplicated resume. Requires authentication.",
+				"Creates a copy of an existing resume with the same data, and the given name and tags. The slug is optional: when omitted it is generated from the name and made unique across the user's resumes. Returns the ID of the duplicated resume. Requires authentication.",
 			successDescription: "The ID of the duplicated resume.",
 		})
 		.input(resumeDto.duplicate.input)
@@ -212,14 +230,15 @@ export const crudRouter = {
 		.output(resumeDto.duplicate.output)
 		.handler(async ({ context, input }) => {
 			const original = await resumeService.getById({ id: input.id, userId: context.user.id });
+			const data = parseStoredResumeData(original.data);
 
 			return resumeService.create({
 				userId: context.user.id,
 				name: input.name ?? original.name,
-				slug: input.slug ?? original.slug,
+				...(input.slug ? { slug: input.slug } : {}),
 				tags: input.tags ?? original.tags,
 				locale: context.locale,
-				data: original.data,
+				data,
 			});
 		}),
 
@@ -229,15 +248,14 @@ export const crudRouter = {
 			path: "/resumes/{id}",
 			tags: ["Resumes"],
 			operationId: "deleteResume",
-			summary: "Delete a resume",
+			summary: "Move a resume to Trash",
 			description:
-				"Permanently deletes a resume and its associated files (screenshots, PDFs) from storage. Locked resumes cannot be deleted; unlock the resume first. Requires authentication.",
-			successDescription: "The resume and its associated files were deleted successfully.",
+				"Moves a resume to Trash, which stops its public link. It stays there for 30 days, then it and its files are deleted; until then it can be restored (documents.restore) or deleted at once (documents.purge). Locked resumes can't be moved; unlock the resume first. Requires authentication.",
+			successDescription: "The resume is in Trash.",
 		})
 		.input(resumeDto.delete.input)
 		.use(resumeMutationRateLimit)
 		.output(resumeDto.delete.output)
-		.handler(async ({ context, input }) => {
-			return resumeService.delete({ id: input.id, userId: context.user.id });
-		}),
+		.errors({ RESUME_LOCKED: { status: 403, message: "Unlock the resume first." } })
+		.handler(({ context, input }) => documentsService.trash({ type: "resume", id: input.id, userId: context.user.id })),
 };

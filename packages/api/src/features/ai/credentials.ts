@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { ORPCError } from "@orpc/client";
 import { env } from "@reactive-resume/env/server";
 
 const CIPHER = "aes-256-gcm";
@@ -10,11 +11,6 @@ type StoredCredentialFields = {
 	encryptedApiKey: string;
 	apiKeySalt: string;
 	apiKeyHash: string;
-	apiKeyPreview: string;
-};
-
-type RedactedCredentialFields = {
-	apiKeyFingerprint: string;
 	apiKeyPreview: string;
 };
 
@@ -44,7 +40,7 @@ function makePreview(apiKey: string) {
 	return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`;
 }
 
-export function fingerprintCredential(apiKey: string, salt: string) {
+function fingerprintCredential(apiKey: string, salt: string) {
 	return createHash("sha256").update(salt).update(":").update(apiKey).digest("hex");
 }
 
@@ -65,41 +61,38 @@ export function encryptCredential(apiKey: string): StoredCredentialFields {
 	};
 }
 
+const unreadableCredential = () =>
+	new ORPCError("AI_CREDENTIAL_DECRYPTION_FAILED", {
+		status: 412,
+		message: "The saved provider key can't be decrypted. Enter the key again in Settings → AI & developer.",
+	});
+
 export function decryptCredential(payload: string) {
 	const [version, encodedIv, encodedAuthTag, encodedCiphertext] = payload.split(".");
-	if (version !== CREDENTIAL_VERSION || !encodedIv || !encodedAuthTag || !encodedCiphertext) {
-		throw new Error("INVALID_ENCRYPTED_CREDENTIAL");
+	// A malformed payload is as unrecoverable as one sealed with another secret: the user enters the key again.
+	if (version !== CREDENTIAL_VERSION || !encodedIv || !encodedAuthTag || encodedCiphertext === undefined)
+		throw unreadableCredential();
+
+	const key = getEncryptionKey();
+	try {
+		const decipher = createDecipheriv(CIPHER, key, decode(encodedIv));
+		decipher.setAuthTag(decode(encodedAuthTag));
+		return Buffer.concat([decipher.update(decode(encodedCiphertext)), decipher.final()]).toString("utf8");
+	} catch {
+		throw unreadableCredential();
 	}
-
-	const decipher = createDecipheriv(CIPHER, getEncryptionKey(), decode(encodedIv));
-	decipher.setAuthTag(decode(encodedAuthTag));
-
-	return Buffer.concat([decipher.update(decode(encodedCiphertext)), decipher.final()]).toString("utf8");
-}
-
-export function redactEncryptedCredential(fields: StoredCredentialFields): RedactedCredentialFields {
-	return {
-		apiKeyFingerprint: fields.apiKeyHash,
-		apiKeyPreview: fields.apiKeyPreview,
-	};
 }
 
 function isCredentialEncryptionConfigured() {
 	return !!getEncryptionSecret();
 }
 
-function isAgentStreamingConfigured() {
-	return !!env.REDIS_URL?.trim();
-}
-
-export function isAgentEnvironmentConfigured() {
-	return isCredentialEncryptionConfigured() && isAgentStreamingConfigured();
-}
-
 export function assertCredentialEncryptionConfigured() {
 	if (!isCredentialEncryptionConfigured()) throw new Error("AI_CREDENTIAL_ENCRYPTION_UNAVAILABLE");
 }
 
+// Personal keys need ENCRYPTION_SECRET; server AI uses environment credentials. Redis is optional: replies survive a reload
+// and Stop reaches a run on another server; without it, both work within one server.
 export function assertAgentEnvironment() {
-	if (!isAgentEnvironmentConfigured()) throw new Error("AGENT_ENVIRONMENT_UNAVAILABLE");
+	if (!isCredentialEncryptionConfigured() && !env.AI_PROVIDER) throw new Error("AGENT_ENVIRONMENT_UNAVAILABLE");
 }

@@ -1,68 +1,83 @@
 import type { RouterClient } from "@orpc/server";
+import type { RequestAuthentication } from "@reactive-resume/api/context";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { onError } from "@orpc/client";
 import { createRouterClient } from "@orpc/server";
-import router from "@reactive-resume/api/routers";
-import { MCP_TOOL_NAME, registerPrompts, registerResources, registerTools } from "@reactive-resume/mcp";
+import {
+	buildMcpServerInfo,
+	MCP_TOOL_NAME,
+	MCP_ROUTER,
+	registerParityTools,
+	registerPrompts,
+	registerResources,
+	registerTools,
+	registerToolDiscovery,
+} from "@reactive-resume/mcp";
 import { appVersion } from "../app-version";
 import { getRequestLocale } from "../rpc/locale";
 
-function createRequestClient(request: Request): RouterClient<typeof router> {
-	return createRouterClient(router, {
+function createRequestClient(
+	request: Request,
+	authentication: RequestAuthentication,
+	trustedClient: string,
+	resHeaders: Headers,
+): RouterClient<typeof MCP_ROUTER> {
+	const reqHeaders = new Headers(request.headers);
+	reqHeaders.delete("cookie");
+	return createRouterClient(MCP_ROUTER, {
 		interceptors: [
+			(options) => {
+				request.signal.throwIfAborted();
+				return options.next({
+					...options,
+					signal: options.signal ? AbortSignal.any([request.signal, options.signal]) : request.signal,
+				});
+			},
 			onError((error) => {
-				console.error("[MCP oRPC]", error);
+				console.error("[MCP oRPC]", { name: error instanceof Error ? error.name : "Unknown" });
 			}),
 		],
 		context: () => ({
 			locale: getRequestLocale(request),
-			reqHeaders: request.headers,
-			resHeaders: new Headers(),
+			reqHeaders,
+			resHeaders,
+			trustedClient,
+			authentication,
 		}),
 	});
 }
 
-export async function createMcpServer(request: Request) {
-	const server = new McpServer(
-		{
-			name: "reactive-resume",
-			version: appVersion,
-			title: "Reactive Resume",
-			websiteUrl: "https://rxresu.me",
-			description:
-				"Reactive Resume is a free and open-source resume builder. Use this MCP server to interact with your resume using an LLM of your choice.",
-			icons: [
-				{
-					src: "https://rxresu.me/icon/light.svg",
-					mimeType: "image/svg+xml",
-					theme: "light",
-				},
-				{
-					src: "https://rxresu.me/icon/dark.svg",
-					mimeType: "image/svg+xml",
-					theme: "dark",
-				},
-			],
-		},
-		{
-			instructions: [
-				"You are connected to Reactive Resume over MCP.",
-				"Authenticate with OAuth (recommended) or an API key (`x-api-key`).",
-				`Discover resume IDs with \`${MCP_TOOL_NAME.listResumes}\` (not \`resources/list\`).`,
-				`List distinct tags with \`${MCP_TOOL_NAME.listResumeTags}\`.`,
-				`Read schema at \`resume://_meta/schema\`; read resume JSON via \`resume://{id}\` or \`${MCP_TOOL_NAME.getResume}\`.`,
-				`Apply body edits with JSON Patch through \`${MCP_TOOL_NAME.patchResume}\`.`,
-				`Change name, slug, tags, or public visibility with \`${MCP_TOOL_NAME.updateResume}\` (returns canonical share URL; anonymous access only when \`isPublic\` is true; passwords are managed in the web app only).`,
-				`Create short-lived authenticated PDF download URLs with \`${MCP_TOOL_NAME.downloadResumePdf}\`.`,
-				`Import full ResumeData JSON with \`${MCP_TOOL_NAME.importResume}\`; read saved AI analysis with \`${MCP_TOOL_NAME.getResumeAnalysis}\`.`,
-			].join(" "),
-		},
-	);
+export function createMcpServer(
+	request: Request,
+	authentication: RequestAuthentication,
+	trustedClient: string,
+	resHeaders: Headers,
+) {
+	const server = new McpServer(buildMcpServerInfo(appVersion), {
+		instructions: [
+			"Reactive Resume holds the user's resumes, cover letters and job applications.",
+			`Find resume IDs with \`${MCP_TOOL_NAME.listResumes}\` and read one with \`${MCP_TOOL_NAME.getResume}\`; the resume JSON Schema is the \`resume://_meta/schema\` resource.`,
+			`Edit resume content with JSON Patch through \`${MCP_TOOL_NAME.patchResume}\`, and change a resume's name, slug, tags or public visibility with \`${MCP_TOOL_NAME.updateResume}\`.`,
+			`Track job applications with the application tools, starting from \`${MCP_TOOL_NAME.listApplications}\`.`,
+			`Get a short-lived PDF link with \`${MCP_TOOL_NAME.downloadResumePdf}\`; export cover letters with \`${MCP_TOOL_NAME.exportCoverLetter}\`.`,
+			"Tools named api_* expose the rest of the Reactive Resume API. Tools that involve passwords, API keys or AI provider keys return a link to finish in the app.",
+		].join(" "),
+	});
 
-	const client = createRequestClient(request);
+	const client = createRequestClient(request, authentication, trustedClient, resHeaders);
+	const headers = new Headers(request.headers);
+	headers.delete("cookie");
 	registerResources(server, client);
-	registerTools(server, client, request.headers);
-	registerPrompts(server);
+	registerTools(server, client, headers, authentication);
+	registerParityTools(server, client, headers, {
+		authentication,
+		resHeaders,
+		trustedClient,
+		locale: getRequestLocale(request),
+		signal: request.signal,
+	});
+	registerPrompts(server, client);
+	registerToolDiscovery(server);
 
 	return server;
 }

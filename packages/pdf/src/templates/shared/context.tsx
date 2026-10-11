@@ -1,6 +1,3 @@
-import type { StyleSlot } from "@reactive-resume/schema/resume/data";
-import type { ReactNode } from "react";
-import type { SectionStyleRuleContext } from "./style-rules";
 import type { StyleInput, TemplatePlacement } from "./styles";
 import type {
 	SectionTimelineStyleSlots,
@@ -12,20 +9,21 @@ import type {
 	TemplateStyleSlot,
 	TemplateStyleSlots,
 } from "./types";
+import type { ReactNode } from "react";
 import { createContext, use, useMemo } from "react";
-import { useRender } from "../../context";
-import { resolveStyleRuleSlot } from "./style-rules";
 
 type TemplateContextValue = {
 	styles: TemplateStyleSlots;
 	featureStyles: TemplateFeatureStyleSlots;
 	colors: TemplateColorRoles;
 	features: TemplateFeatures;
+	pageNodeKey: string;
 };
 
 type TemplateProviderProps = Omit<TemplateContextValue, "featureStyles" | "features" | "sectionTitleFallbacks"> & {
 	featureStyles?: TemplateFeatureStyleSlots;
 	features?: TemplateFeatures;
+	pageNodeKey: string;
 	children: ReactNode;
 };
 
@@ -34,14 +32,8 @@ type TemplatePlacementProviderProps = {
 	children: ReactNode;
 };
 
-type SectionStyleProviderProps = {
-	context: SectionStyleRuleContext;
-	children: ReactNode;
-};
-
 const TemplateContext = createContext<TemplateContextValue | null>(null);
 const TemplatePlacementContext = createContext<TemplatePlacement>("main");
-const SectionStyleContext = createContext<SectionStyleRuleContext | null>(null);
 
 const resolveStyleSlot = (slot: TemplateStyleSlot | undefined, context: TemplateStyleContextValue): StyleInput => {
 	if (!slot) return undefined;
@@ -73,11 +65,12 @@ export const TemplateProvider = ({
 	featureStyles = EMPTY_FEATURE_STYLES,
 	colors,
 	features = EMPTY_FEATURES,
+	pageNodeKey,
 	children,
 }: TemplateProviderProps) => {
 	const contextValue = useMemo<TemplateContextValue>(
-		() => ({ styles, featureStyles, colors, features }),
-		[colors, featureStyles, features, styles],
+		() => ({ styles, featureStyles, colors, features, pageNodeKey }),
+		[colors, featureStyles, features, pageNodeKey, styles],
 	);
 
 	return <TemplateContext.Provider value={contextValue}>{children}</TemplateContext.Provider>;
@@ -85,10 +78,6 @@ export const TemplateProvider = ({
 
 export const TemplatePlacementProvider = ({ placement, children }: TemplatePlacementProviderProps) => {
 	return <TemplatePlacementContext.Provider value={placement}>{children}</TemplatePlacementContext.Provider>;
-};
-
-export const SectionStyleProvider = ({ context, children }: SectionStyleProviderProps) => {
-	return <SectionStyleContext.Provider value={context}>{children}</SectionStyleContext.Provider>;
 };
 
 const useTemplateContext = () => {
@@ -107,6 +96,8 @@ export const useTemplateFeature = (feature: keyof TemplateFeatures): boolean => 
 
 export const useTemplatePlacement = () => use(TemplatePlacementContext);
 
+export const useTemplatePageNodeKey = () => useTemplateContext().pageNodeKey;
+
 const useTemplateStyleContext = (): TemplateStyleContextValue => {
 	const { colors } = useTemplateContext();
 	const placement = useTemplatePlacement();
@@ -119,15 +110,6 @@ export const useTemplateStyle = (slot: keyof TemplateStyleSlots): StyleInput => 
 	const context = useTemplateStyleContext();
 
 	return resolveStyleSlot(styles[slot] as TemplateStyleSlot | undefined, context);
-};
-
-export const useSectionStyleRule = (slot: StyleSlot): StyleInput => {
-	const data = useRender();
-	const context = use(SectionStyleContext);
-
-	if (!context) return undefined;
-
-	return resolveStyleRuleSlot(data, { ...context, slot });
 };
 
 export const useTemplateFeatureStyle = (

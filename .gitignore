@@ -4,12 +4,15 @@ node_modules
 
 # Build Outputs
 dist
+dist-prerender
+dist-cloudflare
 .vercel
 .wrangler
 
 # Environment Variables
 .env*
 !.env.example
+.dev.vars*
 
 # IDEs and Editors
 *~
@@ -49,12 +52,21 @@ temp
 .agents
 .claude
 .cursor
+.mcp.json
+!/plugins/*/.mcp.json
+.opencode
 .codegraph
 .superpowers
+.worktrees
+.migration
+/plans
 
 # Local Storage Data
 /data
 /apps/web/data
 
+# Redesign handoff (design references, not source)
+/design_handoff_reactive_resume_redesign
+
 # Git Hooks
-.vite-hooks/
+.vite-hooks

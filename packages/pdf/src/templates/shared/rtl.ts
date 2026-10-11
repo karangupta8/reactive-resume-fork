@@ -1,6 +1,6 @@
-import type { Style } from "@react-pdf/types";
+import type { Style } from "../../forme/style-types";
 
-export type RtlStyleHelpers = {
+type RtlStyleHelpers = {
 	rtl: boolean;
 	pageDirection: "ltr" | "rtl";
 	row: "row" | "row-reverse";
@@ -13,10 +13,20 @@ export type RtlStyleHelpers = {
 	contactSeparator: (color: string, gap: number) => Style;
 	contactSeparatorClear: Style;
 	anchorToStart: (offset?: number | string) => Style;
+	/** The flex direction of the row that holds a two-column template's columns. */
+	columns: "row" | "row-reverse";
+	/** Like `anchorToStart`, for the side the template's own sidebar starts from. */
+	anchorToColumnStart: (offset?: number | string) => Style;
+	/** Left and right padding for a column, given as the template draws it: `start` on its own left. */
+	columnInset: (start: number, end: number) => Pick<Style, "paddingLeft" | "paddingRight">;
 };
 
-export function createRtlStyleHelpers(rtl: boolean): RtlStyleHelpers {
+export function createRtlStyleHelpers(rtl: boolean, columnsReversed = rtl): RtlStyleHelpers {
 	return {
+		columns: columnsReversed ? "row-reverse" : "row",
+		anchorToColumnStart: (offset = 0) => (columnsReversed ? { right: offset } : { left: offset }),
+		columnInset: (start, end) =>
+			columnsReversed ? { paddingLeft: end, paddingRight: start } : { paddingLeft: start, paddingRight: end },
 		rtl,
 		pageDirection: rtl ? "rtl" : "ltr",
 		row: rtl ? "row-reverse" : "row",

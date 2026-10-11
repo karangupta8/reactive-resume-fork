@@ -12,15 +12,18 @@ import { rectSortingStrategy, SortableContext, sortableKeyboardCoordinates, useS
 import { CSS } from "@dnd-kit/utilities";
 import { t } from "@lingui/core/macro";
 import { Trans } from "@lingui/react/macro";
-import { PencilSimpleIcon, XIcon } from "@phosphor-icons/react";
-import { AnimatePresence, m } from "motion/react";
+import { useReducedMotion } from "motion/react";
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { Badge } from "@reactive-resume/ui/components/badge";
+import { useFormControl } from "@reactive-resume/ui/components/form";
+import { Icon } from "@reactive-resume/ui/components/icon";
 import { Input } from "@reactive-resume/ui/components/input";
 import { Kbd } from "@reactive-resume/ui/components/kbd";
 import { cn } from "@reactive-resume/utils/style";
 import { useControlledState } from "@/hooks/use-controlled-state";
+import { isImeComposing } from "@/libs/keyboard";
+import { DRAG_SETTLE } from "@/libs/motion";
 
 const RETURN_KEY = "Enter";
 const COMMA_KEY = ",";
@@ -43,7 +46,7 @@ function ChipDragPreview({ chip }: ChipDragPreviewProps) {
 	return (
 		<Badge
 			variant="outline"
-			className="h-6 max-w-44 cursor-grabbing select-none justify-start rounded-md border-ring bg-muted px-2 font-medium text-foreground text-xs shadow-lg ring-2 ring-ring/25 sm:max-w-52"
+			className="h-6 max-w-44 cursor-grabbing justify-start rounded-md border-accent bg-sunken px-2 text-xs font-medium text-ink shadow-lg ring-2 ring-accent/25 select-none sm:max-w-52"
 		>
 			<span className="truncate">{chip}</span>
 		</Badge>
@@ -55,17 +58,21 @@ type ChipDragOverlayProps = {
 };
 
 function ChipDragOverlay({ activeChip }: ChipDragOverlayProps) {
+	const reduceMotion = useReducedMotion();
 	const overlay = (
-		<DragOverlay dropAnimation={null}>{activeChip ? <ChipDragPreview chip={activeChip} /> : null}</DragOverlay>
+		<DragOverlay dropAnimation={reduceMotion ? null : DRAG_SETTLE}>
+			{activeChip ? <ChipDragPreview chip={activeChip} /> : null}
+		</DragOverlay>
 	);
-
-	if (typeof document === "undefined") return overlay;
 
 	return createPortal(overlay, document.body);
 }
 
 function ChipItem({ id, chip, index, isEditing, onEdit, onRemove }: ChipItemProps) {
-	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+		id,
+		transition: DRAG_SETTLE,
+	});
 
 	const style = {
 		transition,
@@ -74,37 +81,32 @@ function ChipItem({ id, chip, index, isEditing, onEdit, onRemove }: ChipItemProp
 	};
 
 	return (
-		<m.div
-			layout
-			initial={{ opacity: 0, scale: 0.92, y: -4 }}
-			animate={{ opacity: isDragging ? 0.62 : 1, scale: 1, y: 0 }}
-			exit={{ opacity: 0, scale: 0.92, y: -4 }}
-			transition={{ duration: 0.1, ease: "easeOut" }}
+		<div
 			style={style}
 			ref={setNodeRef}
-			className="group/chip relative touch-none"
+			className={cn("group/chip relative touch-none", isDragging && "opacity-60")}
 			{...attributes}
 			{...listeners}
 		>
 			<Badge
 				variant="outline"
 				className={cn(
-					"h-6 max-w-full cursor-grab select-none justify-start gap-0 rounded-md border-border bg-muted/55 px-2 font-medium text-foreground text-xs transition-colors hover:border-foreground/20 hover:bg-muted active:cursor-grabbing",
-					isEditing && "border-primary bg-primary/10 ring-1 ring-primary/40",
-					isDragging && "border-ring bg-muted shadow-sm",
+					"h-6 max-w-full cursor-grab justify-start gap-0 rounded-md border-line bg-sunken/55 px-2 text-xs font-medium text-ink transition-colors select-none hover:border-ink/20 hover:bg-sunken active:cursor-grabbing",
+					isEditing && "border-accent bg-accent/10 ring-1 ring-accent/40",
+					isDragging && "border-accent bg-sunken shadow-sm",
 				)}
 			>
 				<span className="max-w-32 truncate sm:max-w-44">{chip}</span>
-				<m.div
-					initial={false}
-					animate={isEditing ? { opacity: 1 } : { opacity: 0.66 }}
-					transition={{ duration: 0.12, ease: "easeOut" }}
-					className="ms-1.5 flex shrink-0 items-center gap-x-0.5 will-change-[opacity] group-focus-within/chip:opacity-100 group-hover/chip:opacity-100"
+				<div
+					className={cn(
+						"ms-1.5 flex shrink-0 items-center gap-x-0.5 transition-opacity duration-quick group-focus-within/chip:opacity-100 group-hover/chip:opacity-100",
+						isEditing ? "opacity-100" : "opacity-65",
+					)}
 				>
 					<button
 						type="button"
 						tabIndex={-1}
-						className="rounded-sm p-0.5 text-foreground/70 transition-colors hover:bg-secondary hover:text-foreground focus:outline-none"
+						className="rounded-sm p-0.5 text-ink/70 transition-colors hover:bg-sunken hover:text-ink focus:outline-none"
 						aria-label={t({
 							comment:
 								"Screen reader label for button that edits a keyword chip. Variable is the current keyword text.",
@@ -115,12 +117,12 @@ function ChipItem({ id, chip, index, isEditing, onEdit, onRemove }: ChipItemProp
 							onEdit(index);
 						}}
 					>
-						<PencilSimpleIcon className="size-3.5" />
+						<Icon name="pencil-simple" size={14} />
 					</button>
 					<button
 						type="button"
 						tabIndex={-1}
-						className="rounded-sm p-0.5 text-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive focus:outline-none"
+						className="rounded-sm p-0.5 text-ink/70 transition-colors hover:bg-danger/10 hover:text-danger-text focus:outline-none"
 						aria-label={t({
 							comment:
 								"Screen reader label for button that removes a keyword chip. Variable is the current keyword text.",
@@ -131,11 +133,11 @@ function ChipItem({ id, chip, index, isEditing, onEdit, onRemove }: ChipItemProp
 							onRemove(index);
 						}}
 					>
-						<XIcon className="size-3.5" />
+						<Icon name="x" size={14} />
 					</button>
-				</m.div>
+				</div>
 			</Badge>
-		</m.div>
+		</div>
 	);
 }
 
@@ -144,6 +146,7 @@ type Props = Omit<React.ComponentProps<"div">, "value" | "onChange"> & {
 	defaultValue?: string[];
 	onChange?: (value: string[]) => void;
 	hideDescription?: boolean;
+	allowCommas?: boolean;
 };
 
 export function ChipInput({
@@ -152,8 +155,18 @@ export function ChipInput({
 	onChange,
 	className,
 	hideDescription = false,
+	allowCommas = false,
+	id: idProp,
+	"aria-describedby": ariaDescribedByProp,
+	"aria-invalid": ariaInvalidProp,
 	...props
 }: Props) {
+	const formControl = useFormControl();
+	const controlId = idProp ?? formControl.id;
+	const describedBy = ariaDescribedByProp ?? formControl["aria-describedby"];
+	const invalid = ariaInvalidProp ?? formControl["aria-invalid"];
+	const labelId = formControl.labelId;
+
 	const [chips, setChips] = useControlledState<string[]>({
 		value,
 		defaultValue,
@@ -176,7 +189,7 @@ export function ChipInput({
 			});
 			if (nextValues.length === 0) return;
 
-			const newChips = Array.from(new Set([...chips, ...nextValues]));
+			const newChips = [...new Set([...chips, ...nextValues])];
 			setChips(newChips);
 		},
 		[chips, setChips],
@@ -222,8 +235,10 @@ export function ChipInput({
 
 	const handleEdit = React.useCallback(
 		(index: number) => {
+			const chip = chips[index];
+			if (chip === undefined) return;
 			setEditingIndex(index);
-			setInput(chips[index]);
+			setInput(chip);
 			inputRef.current?.focus();
 		},
 		[chips],
@@ -233,7 +248,7 @@ export function ChipInput({
 		(newOrder: string[]) => {
 			if (editingIndex !== null) {
 				const editingChip = chips[editingIndex];
-				const newIndex = newOrder.indexOf(editingChip);
+				const newIndex = editingChip === undefined ? -1 : newOrder.indexOf(editingChip);
 				if (newIndex !== -1 && newIndex !== editingIndex) {
 					setEditingIndex(newIndex);
 				}
@@ -269,8 +284,9 @@ export function ChipInput({
 			const oldIndex = chips.indexOf(active.id as string);
 			const newIndex = chips.indexOf(over.id as string);
 			if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-				const newOrder = Array.from(chips);
+				const newOrder = [...chips];
 				const [removed] = newOrder.splice(oldIndex, 1);
+				if (removed === undefined) return;
 				newOrder.splice(newIndex, 0, removed);
 				handleReorder(newOrder);
 			}
@@ -283,7 +299,7 @@ export function ChipInput({
 			const newValue = e.target.value;
 
 			if (editingIndex !== null) {
-				if (newValue.includes(",")) {
+				if (!allowCommas && newValue.includes(",")) {
 					updateChip(editingIndex, newValue.replace(",", ""));
 					setEditingIndex(null);
 					setInput("");
@@ -293,20 +309,21 @@ export function ChipInput({
 				return;
 			}
 
-			if (newValue.includes(",")) {
+			if (!allowCommas && newValue.includes(",")) {
 				const parts = newValue.split(",");
 				addChips(parts.slice(0, -1));
-				setInput(parts[parts.length - 1]);
+				setInput(parts.at(-1) ?? "");
 			} else {
 				setInput(newValue);
 			}
 		},
-		[addChips, editingIndex, updateChip],
+		[addChips, allowCommas, editingIndex, updateChip],
 	);
 
 	const handleKeyDown = React.useCallback(
 		(e: React.KeyboardEvent<HTMLInputElement>) => {
-			if (e.key === "Enter" || e.key === ",") {
+			if (isImeComposing(e)) return;
+			if (e.key === "Enter" || (!allowCommas && e.key === ",")) {
 				e.preventDefault();
 
 				if (editingIndex !== null) {
@@ -324,7 +341,7 @@ export function ChipInput({
 				setInput("");
 			}
 		},
-		[input, addChip, editingIndex, updateChip],
+		[input, addChip, allowCommas, editingIndex, updateChip],
 	);
 
 	return (
@@ -340,64 +357,59 @@ export function ChipInput({
 				<div
 					role="none"
 					onClick={() => inputRef.current?.focus()}
-					className="overflow-hidden rounded-lg border border-input bg-background/40 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/20"
+					className="overflow-hidden rounded-lg border border-line-2 bg-bg/40 transition-colors focus-within:border-accent focus-within:ring-3 focus-within:ring-accent/50 dark:bg-line-2/20"
 				>
 					<div className="flex flex-col">
 						<div
-							className={cn("max-h-24 overflow-y-auto px-2 py-1.5", hasChips ? "border-border/70 border-b" : "hidden")}
+							className={cn("max-h-24 overflow-y-auto px-2 py-1.5", hasChips ? "border-b border-line/70" : "hidden")}
 						>
 							<SortableContext items={chips} strategy={rectSortingStrategy}>
-								<m.div layout className="flex flex-wrap gap-1">
-									<AnimatePresence initial={false} mode="popLayout">
-										{chips.map((chip, idx) => (
-											<ChipItem
-												key={chip}
-												id={chip}
-												chip={chip}
-												index={idx}
-												isEditing={editingIndex === idx}
-												onEdit={handleEdit}
-												onRemove={removeChip}
-											/>
-										))}
-									</AnimatePresence>
-								</m.div>
+								<div className="flex flex-wrap gap-1">
+									{chips.map((chip, idx) => (
+										<ChipItem
+											key={chip}
+											id={chip}
+											chip={chip}
+											index={idx}
+											isEditing={editingIndex === idx}
+											onEdit={handleEdit}
+											onRemove={removeChip}
+										/>
+									))}
+								</div>
 							</SortableContext>
 						</div>
 						<div className={cn("flex items-center gap-1.5 px-2", hasChips ? "py-1.5" : "py-0")}>
 							<Input
 								ref={inputRef}
 								type="text"
+								id={controlId}
 								value={input}
 								autoComplete="off"
+								// A resolvable aria-labelledby outranks aria-label, so a rendered FormLabel still wins;
+								// when the FormControl has no FormLabel the reference dangles and the accessible name
+								// falls back to aria-label instead of going empty.
 								aria-label={isEditingKeyword ? t`Edit keyword` : t`Add keyword`}
+								aria-labelledby={labelId}
+								aria-describedby={describedBy}
+								aria-invalid={invalid}
 								placeholder={isEditingKeyword ? t`Editing keyword...` : t`Add a keyword...`}
 								onKeyDown={handleKeyDown}
 								onChange={handleInputChange}
 								className="h-9 flex-1 border-none p-0 focus-visible:border-none focus-visible:ring-0 dark:bg-transparent"
 							/>
-							<AnimatePresence>
-								{chips.length > 0 && (
-									<m.span
-										layout
-										initial={{ opacity: 0, scale: 0.95 }}
-										animate={{
-											opacity: isEditingKeyword ? 1 : 0.8,
-											scale: 1,
-										}}
-										exit={{ opacity: 0, scale: 0.95 }}
-										transition={{ duration: 0.12, ease: "easeOut" }}
-										className={cn(
-											"flex h-6 min-w-6 shrink-0 items-center justify-center rounded-md border px-1.5 font-medium text-[0.7rem] tabular-nums",
-											isEditingKeyword
-												? "border-primary/30 bg-primary/10 text-primary"
-												: "border-border bg-muted/50 text-foreground/80",
-										)}
-									>
-										{isEditingKeyword ? <Trans>Edit</Trans> : chips.length}
-									</m.span>
-								)}
-							</AnimatePresence>
+							{chips.length > 0 && (
+								<span
+									className={cn(
+										"flex h-6 min-w-6 shrink-0 items-center justify-center rounded-md border px-1.5 text-[0.7rem] font-medium tabular-nums",
+										isEditingKeyword
+											? "border-accent/30 bg-accent/10 text-accent-text"
+											: "border-line bg-sunken/50 text-ink/80 opacity-80",
+									)}
+								>
+									{isEditingKeyword ? <Trans>Edit</Trans> : chips.length}
+								</span>
+							)}
 						</div>
 					</div>
 				</div>
@@ -405,10 +417,16 @@ export function ChipInput({
 			</DndContext>
 
 			{!hideDescription && (
-				<p className="text-muted-foreground text-xs">
-					<Trans>
-						Press <Kbd>{RETURN_KEY}</Kbd> or <Kbd>{COMMA_KEY}</Kbd> to add or save the current keyword.
-					</Trans>
+				<p className="text-xs text-ink-3">
+					{allowCommas ? (
+						<Trans>
+							Press <Kbd>{RETURN_KEY}</Kbd> to add or save the current keyword.
+						</Trans>
+					) : (
+						<Trans>
+							Press <Kbd>{RETURN_KEY}</Kbd> or <Kbd>{COMMA_KEY}</Kbd> to add or save the current keyword.
+						</Trans>
+					)}
 				</p>
 			)}
 		</div>

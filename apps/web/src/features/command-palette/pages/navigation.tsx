@@ -1,20 +1,11 @@
 import { t } from "@lingui/core/macro";
 import { Trans } from "@lingui/react/macro";
-import {
-	ChatCircleDotsIcon,
-	GearIcon,
-	HouseSimpleIcon,
-	KeyIcon,
-	OpenAiLogoIcon,
-	ReadCvLogoIcon,
-	ShieldCheckIcon,
-	UserCircleIcon,
-	WarningIcon,
-} from "@phosphor-icons/react";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import { CommandItem } from "@reactive-resume/ui/components/command";
+import { Icon } from "@reactive-resume/ui/components/icon";
 import { useCommandPaletteStore } from "../store";
 import { BaseCommandGroup } from "./base";
+import { useDialogStore } from "@/dialogs/store";
 
 export function NavigationCommandGroup() {
 	const navigate = useNavigate();
@@ -31,28 +22,73 @@ export function NavigationCommandGroup() {
 		<>
 			<BaseCommandGroup heading={<Trans>Go to…</Trans>}>
 				<CommandItem keywords={[t`Home`]} value="navigation.home" onSelect={() => onNavigate("/")}>
-					<HouseSimpleIcon />
+					<Icon name="house" size={16} />
 					<Trans>Home</Trans>
 				</CommandItem>
 
 				<CommandItem
 					disabled={!session}
-					keywords={[t`Resumes`]}
-					value="navigation.resumes"
-					onSelect={() => onNavigate("/dashboard/resumes")}
+					keywords={[t`Documents`, t`Resumes`, t`Cover letters`]}
+					value="navigation.documents"
+					onSelect={() => onNavigate("/dashboard")}
 				>
-					<ReadCvLogoIcon />
-					<Trans>Resumes</Trans>
+					<Icon name="file-text" size={16} />
+					<Trans>Documents</Trans>
 				</CommandItem>
 
 				<CommandItem
 					disabled={!session}
-					keywords={[t`Agent`, t`Artificial Intelligence`]}
-					value="navigation.agent"
-					onSelect={() => onNavigate("/agent")}
+					keywords={[t`New document`, t`Create`, t`Import`]}
+					value="navigation.documents.new"
+					onSelect={() => {
+						reset();
+						useDialogStore.getState().openDialog("document.new", undefined);
+					}}
 				>
-					<ChatCircleDotsIcon />
-					<Trans>Agent</Trans>
+					<Icon name="plus" size={16} />
+					<Trans>New document</Trans>
+				</CommandItem>
+
+				<CommandItem
+					disabled={!session}
+					keywords={[t`Trash`, t`Deleted`]}
+					value="navigation.trash"
+					onSelect={() => onNavigate("/dashboard/trash")}
+				>
+					<Icon name="trash" size={16} />
+					<Trans>Trash</Trans>
+				</CommandItem>
+
+				<CommandItem
+					keywords={[t`ATS Checker`, t`Check a PDF`]}
+					value="navigation.ats-checker"
+					onSelect={() => onNavigate("/ats-checker")}
+				>
+					<Icon name="seal-check" size={16} />
+					<Trans>ATS Checker</Trans>
+				</CommandItem>
+
+				<CommandItem
+					disabled={!session}
+					keywords={[t`Applications`, t`Jobs`]}
+					value="navigation.applications"
+					onSelect={() => onNavigate("/dashboard/applications")}
+				>
+					<Icon name="briefcase" size={16} />
+					<Trans>Applications</Trans>
+				</CommandItem>
+
+				<CommandItem
+					disabled={!session}
+					keywords={[t`New Application`, t`Add application`, t`Job`]}
+					value="navigation.applications.new"
+					onSelect={async () => {
+						await navigate({ to: "/dashboard/applications", search: { create: true } });
+						reset();
+					}}
+				>
+					<Icon name="plus" size={16} />
+					<Trans>New Application</Trans>
 				</CommandItem>
 
 				<CommandItem
@@ -61,64 +97,45 @@ export function NavigationCommandGroup() {
 					value="navigation.settings"
 					onSelect={() => pushPage("settings")}
 				>
-					<GearIcon />
+					<Icon name="gear-six" size={16} />
 					<Trans>Settings</Trans>
 				</CommandItem>
 			</BaseCommandGroup>
 
 			<BaseCommandGroup page="settings" heading={<Trans>Settings</Trans>}>
 				<CommandItem
-					keywords={[t`Profile`]}
-					value="navigation.settings.profile"
-					onSelect={() => onNavigate("/dashboard/settings/profile")}
+					keywords={[
+						t`Account`,
+						t`Profile`,
+						t`Password`,
+						t`Two-step verification`,
+						t`Passkeys`,
+						t`Export Data`,
+						t`Delete Account`,
+					]}
+					value="navigation.settings.account"
+					onSelect={() => onNavigate("/dashboard/settings/account")}
 				>
-					<UserCircleIcon />
-					<Trans>Profile</Trans>
+					<Icon name="user-circle" size={16} />
+					<Trans>Account</Trans>
 				</CommandItem>
 
 				<CommandItem
-					keywords={[t`Preferences`]}
+					keywords={[t`Preferences`, t`Theme`, t`Language`]}
 					value="navigation.settings.preferences"
 					onSelect={() => onNavigate("/dashboard/settings/preferences")}
 				>
-					<GearIcon />
+					<Icon name="gear-six" size={16} />
 					<Trans>Preferences</Trans>
 				</CommandItem>
 
 				<CommandItem
-					keywords={[t`Authentication`]}
-					value="navigation.settings.authentication"
-					onSelect={() => onNavigate("/dashboard/settings/authentication")}
+					keywords={[t`AI & developer`, t`AI providers`, t`API Keys`, t`MCP`, t`Integrations`]}
+					value="navigation.settings.ai"
+					onSelect={() => onNavigate("/dashboard/settings/ai")}
 				>
-					<ShieldCheckIcon />
-					<Trans>Authentication</Trans>
-				</CommandItem>
-
-				<CommandItem
-					keywords={[t`API Keys`]}
-					value="navigation.settings.api-keys"
-					onSelect={() => onNavigate("/dashboard/settings/api-keys")}
-				>
-					<KeyIcon />
-					<Trans>API Keys</Trans>
-				</CommandItem>
-
-				<CommandItem
-					keywords={[t`Integrations`, t`Artificial Intelligence`]}
-					value="navigation.settings.integrations"
-					onSelect={() => onNavigate("/dashboard/settings/integrations")}
-				>
-					<OpenAiLogoIcon />
-					<Trans>Integrations</Trans>
-				</CommandItem>
-
-				<CommandItem
-					keywords={[t`Danger Zone`]}
-					value="navigation.settings.danger-zone"
-					onSelect={() => onNavigate("/dashboard/settings/danger-zone")}
-				>
-					<WarningIcon />
-					<Trans>Danger Zone</Trans>
+					<Icon name="key" size={16} />
+					<Trans>AI & developer</Trans>
 				</CommandItem>
 			</BaseCommandGroup>
 		</>

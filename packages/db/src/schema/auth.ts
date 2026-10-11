@@ -23,6 +23,8 @@ export const user = pg.pgTable(
 		username: pg.text("username").notNull().unique(),
 		displayUsername: pg.text("display_username").notNull().unique(),
 		twoFactorEnabled: pg.boolean("two_factor_enabled").notNull().default(false),
+		/** Where the user's times are shown (Settings → Preferences); an IANA name. */
+		timezone: pg.text("timezone").notNull().default("UTC"),
 		lastActiveAt: pg.timestamp("last_active_at", { withTimezone: true }),
 		role: pg.text("role").default("user"),
 		banned: pg.boolean("banned").default(false),
@@ -78,6 +80,10 @@ export const account = pg.pgTable(
 			.$defaultFn(() => generateId()),
 		accountId: pg.text("account_id").notNull(),
 		providerId: pg.text("provider_id").notNull().default("credential"),
+		// Better Auth 1.7.0–1.7.2 wrote this identity namespace. Version 1.7.3
+		// returned to (providerId, accountId), so keep migrated values without
+		// requiring the field on new account inserts.
+		issuer: pg.text("issuer"),
 		userId: pg
 			.text("user_id")
 			.notNull()
@@ -100,7 +106,11 @@ export const account = pg.pgTable(
 			.defaultNow()
 			.$onUpdate(() => /* @__PURE__ */ new Date()),
 	},
-	(t) => [pg.index().on(t.userId)],
+	// Better Auth finds an account by provider and provider account on every social sign-in (#3593).
+	(t) => [
+		pg.index().on(t.userId),
+		pg.uniqueIndex("account_provider_id_account_id_unique").on(t.providerId, t.accountId),
+	],
 );
 
 export const verification = pg.pgTable(
@@ -139,6 +149,8 @@ export const twoFactor = pg.pgTable(
 		secret: pg.text("secret").notNull(),
 		backupCodes: pg.text("backup_codes").notNull(),
 		verified: pg.boolean("verified").notNull().default(true),
+		failedVerificationCount: pg.integer("failed_verification_count").default(0),
+		lockedUntil: pg.timestamp("locked_until", { withTimezone: true }),
 		createdAt: pg.timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: pg
 			.timestamp("updated_at", { withTimezone: true })
@@ -234,11 +246,26 @@ export const jwks = pg.pgTable("jwks", {
 	privateKey: pg.text("private_key").notNull(),
 	createdAt: pg.timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	expiresAt: pg.timestamp("expires_at", { withTimezone: true }),
+	// Better Auth 1.7 added `alg` and `crv` to the jwt plugin's jwks model. Both are optional to
+	// the plugin, but the Drizzle adapter rejects a model whose columns it cannot find, so every
+	// session verification throws until they exist. Existing rows keep NULL and stay valid.
+	alg: pg.text("alg"),
+	crv: pg.text("crv"),
 });
 
 export const oauthClient = pg.pgTable(
 	"oauth_client",
 	{
+		// Additive fields required by Better Auth 1.7 OAuth provider.
+		clientDiscoveryId: pg.text("client_discovery_id"),
+		clientCredentialsScopes: pg.text("client_credentials_scopes").array().default([]),
+		backchannelLogoutUri: pg.text("backchannel_logout_uri"),
+		backchannelLogoutSessionRequired: pg.boolean("backchannel_logout_session_required"),
+		applicationType: pg.text("application_type"),
+		jwks: pg.text("jwks"),
+		jwksUri: pg.text("jwks_uri"),
+		dpopBoundAccessTokens: pg.boolean("dpop_bound_access_tokens").default(false),
+
 		id: pg
 			.text("id")
 			.notNull()
@@ -283,6 +310,15 @@ export const oauthClient = pg.pgTable(
 export const oauthRefreshToken = pg.pgTable(
 	"oauth_refresh_token",
 	{
+		// Additive fields required by Better Auth 1.7 OAuth provider.
+		authorizationCodeId: pg.text("authorization_code_id"),
+		resources: pg.text("resources").array(),
+		requestedUserInfoClaims: pg.text("requested_user_info_claims").array(),
+		rotatedAt: pg.timestamp("rotated_at", { withTimezone: true }),
+		rotationReplayResponse: pg.text("rotation_replay_response"),
+		rotationReplayExpiresAt: pg.timestamp("rotation_replay_expires_at", { withTimezone: true }),
+		confirmation: pg.jsonb("confirmation"),
+
 		id: pg
 			.text("id")
 			.notNull()
@@ -311,6 +347,13 @@ export const oauthRefreshToken = pg.pgTable(
 export const oauthAccessToken = pg.pgTable(
 	"oauth_access_token",
 	{
+		// Additive fields required by Better Auth 1.7 OAuth provider.
+		authorizationCodeId: pg.text("authorization_code_id"),
+		resources: pg.text("resources").array(),
+		requestedUserInfoClaims: pg.text("requested_user_info_claims").array(),
+		revoked: pg.timestamp("revoked", { withTimezone: true }),
+		confirmation: pg.jsonb("confirmation"),
+
 		id: pg
 			.text("id")
 			.notNull()
@@ -335,6 +378,10 @@ export const oauthAccessToken = pg.pgTable(
 export const oauthConsent = pg.pgTable(
 	"oauth_consent",
 	{
+		// Additive fields required by Better Auth 1.7 OAuth provider.
+		resources: pg.text("resources").array(),
+		requestedUserInfoClaims: pg.text("requested_user_info_claims").array(),
+
 		id: pg
 			.text("id")
 			.notNull()
@@ -355,3 +402,56 @@ export const oauthConsent = pg.pgTable(
 	},
 	(t) => [pg.index().on(t.userId, t.clientId)],
 );
+
+export const oauthResource = pg.pgTable("oauth_resource", {
+	id: pg
+		.text("id")
+		.notNull()
+		.primaryKey()
+		.$defaultFn(() => generateId()),
+	identifier: pg.text("identifier").notNull().unique(),
+	name: pg.text("name").notNull(),
+	accessTokenTtl: pg.integer("access_token_ttl"),
+	refreshTokenTtl: pg.integer("refresh_token_ttl"),
+	signingAlgorithm: pg.text("signing_algorithm"),
+	signingKeyId: pg.text("signing_key_id"),
+	allowedScopes: pg.text("allowed_scopes").array(),
+	customClaims: pg.jsonb("custom_claims"),
+	dpopBoundAccessTokensRequired: pg.boolean("dpop_bound_access_tokens_required").default(false),
+	disabled: pg.boolean("disabled").default(false),
+	createdAt: pg.timestamp("created_at", { withTimezone: true }),
+	updatedAt: pg.timestamp("updated_at", { withTimezone: true }),
+	policyVersion: pg.integer("policy_version").default(1),
+	metadata: pg.jsonb("metadata"),
+});
+
+export const oauthClientResource = pg.pgTable(
+	"oauth_client_resource",
+	{
+		id: pg
+			.text("id")
+			.notNull()
+			.primaryKey()
+			.$defaultFn(() => generateId()),
+		clientId: pg
+			.text("client_id")
+			.notNull()
+			.references(() => oauthClient.clientId, { onDelete: "cascade" }),
+		resourceId: pg
+			.text("resource_id")
+			.notNull()
+			.references(() => oauthResource.identifier, { onDelete: "cascade" }),
+		metadata: pg.jsonb("metadata"),
+		createdAt: pg.timestamp("created_at", { withTimezone: true }),
+	},
+	(t) => [pg.index().on(t.clientId), pg.index().on(t.resourceId), pg.uniqueIndex().on(t.clientId, t.resourceId)],
+);
+
+export const oauthClientAssertion = pg.pgTable("oauth_client_assertion", {
+	id: pg
+		.text("id")
+		.notNull()
+		.primaryKey()
+		.$defaultFn(() => generateId()),
+	expiresAt: pg.timestamp("expires_at", { withTimezone: true }).notNull(),
+});

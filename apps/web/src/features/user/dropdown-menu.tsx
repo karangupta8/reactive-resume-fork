@@ -2,10 +2,8 @@ import type { AuthSession } from "@reactive-resume/auth/types";
 import { t } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react";
 import { Trans } from "@lingui/react/macro";
-import { PaletteIcon, SignOutIcon, TranslateIcon } from "@phosphor-icons/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { toast } from "sonner";
-import { useIsClient } from "usehooks-ts";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -19,10 +17,12 @@ import {
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from "@reactive-resume/ui/components/dropdown-menu";
+import { Icon } from "@reactive-resume/ui/components/icon";
+import { toast } from "@reactive-resume/ui/components/toast";
 import { useTheme } from "@/features/theme/provider";
 import { authClient } from "@/libs/auth/client";
 import { getReadableErrorMessage } from "@/libs/error-message";
-import { isLocale, loadLocale, localeMap, setLocaleCookie } from "@/libs/locale";
+import { changeLocale, localeMap } from "@/libs/locale";
 import { isTheme } from "@/libs/theme";
 
 type Props = {
@@ -30,8 +30,8 @@ type Props = {
 };
 
 export function UserDropdownMenu({ children }: Props) {
-	const isClient = useIsClient();
 	const router = useRouter();
+	const queryClient = useQueryClient();
 	const { i18n } = useLingui();
 	const { theme, setTheme } = useTheme();
 	const { data: session } = authClient.useSession();
@@ -41,39 +41,33 @@ export function UserDropdownMenu({ children }: Props) {
 		setTheme(value);
 	};
 
-	const handleLocaleChange = async (value: string) => {
-		if (!isLocale(value)) return;
-		setLocaleCookie(value);
-		await loadLocale(value);
-		window.location.reload();
-	};
-
 	const handleLogout = async () => {
-		const toastId = toast.loading(t`Signing out...`);
+		const toastId = toast.add({ type: "loading", description: t`Signing out...` });
 
 		await authClient.signOut({
 			fetchOptions: {
 				onSuccess: () => {
-					toast.dismiss(toastId);
+					toast.close(toastId);
+					queryClient.clear();
 					void router.invalidate();
 				},
 				onError: ({ error }) => {
-					toast.error(
-						getReadableErrorMessage(
+					toast.add({
+						type: "error",
+						description: getReadableErrorMessage(
 							error,
 							t({
 								comment: "Fallback toast when signing out fails",
 								message: "Failed to sign out. Please try again.",
 							}),
 						),
-						{ id: toastId },
-					);
+						id: toastId,
+					});
 				},
 			},
 		});
 	};
 
-	if (!isClient) return null;
 	if (!session?.user) return null;
 
 	return (
@@ -81,14 +75,19 @@ export function UserDropdownMenu({ children }: Props) {
 			<DropdownMenuTrigger render={children({ session: session as AuthSession })} />
 
 			<DropdownMenuContent align="start" side="top">
+				<DropdownMenuItem onClick={() => void router.navigate({ to: "/dashboard/settings" })}>
+					<Icon name="gear-six" />
+					<Trans>Settings</Trans>
+				</DropdownMenuItem>
+				<DropdownMenuSeparator />
 				<DropdownMenuGroup>
 					<DropdownMenuSub>
 						<DropdownMenuSubTrigger>
-							<TranslateIcon />
+							<Icon name="translate" size={16} />
 							<Trans comment="Menu item that opens language selection submenu">Language</Trans>
 						</DropdownMenuSubTrigger>
 						<DropdownMenuSubContent className="max-h-[400px] overflow-y-auto">
-							<DropdownMenuRadioGroup value={i18n.locale} onValueChange={handleLocaleChange}>
+							<DropdownMenuRadioGroup value={i18n.locale} onValueChange={changeLocale}>
 								{Object.entries(localeMap).map(([value, label]) => (
 									<DropdownMenuRadioItem key={value} value={value}>
 										{i18n.t(label)}
@@ -100,7 +99,7 @@ export function UserDropdownMenu({ children }: Props) {
 
 					<DropdownMenuSub>
 						<DropdownMenuSubTrigger>
-							<PaletteIcon />
+							<Icon name="palette" size={16} />
 							<Trans comment="Menu item that opens appearance theme selection submenu">Theme</Trans>
 						</DropdownMenuSubTrigger>
 						<DropdownMenuSubContent>
@@ -111,6 +110,9 @@ export function UserDropdownMenu({ children }: Props) {
 								<DropdownMenuRadioItem value="dark">
 									<Trans comment="Appearance theme option for dark mode">Dark</Trans>
 								</DropdownMenuRadioItem>
+								<DropdownMenuRadioItem value="system">
+									<Trans comment="Appearance theme option that follows the operating system">System</Trans>
+								</DropdownMenuRadioItem>
 							</DropdownMenuRadioGroup>
 						</DropdownMenuSubContent>
 					</DropdownMenuSub>
@@ -119,8 +121,8 @@ export function UserDropdownMenu({ children }: Props) {
 				<DropdownMenuSeparator />
 
 				<DropdownMenuItem onClick={handleLogout}>
-					<SignOutIcon />
-					<Trans comment="User menu action to sign out of current account">Logout</Trans>
+					<Icon name="sign-out" size={16} />
+					<Trans comment="User menu action to sign out of current account">Sign out</Trans>
 				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>

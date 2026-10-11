@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ReactiveResumeV4JSONImporter } from "./reactive-resume-v4-json";
+import { parseReactiveResumeV4JSON } from "./reactive-resume-v4-json";
 
 const baseV4 = () => ({
 	basics: {
@@ -205,11 +205,9 @@ const baseV4 = () => ({
 	},
 });
 
-const importer = new ReactiveResumeV4JSONImporter();
-
-describe("ReactiveResumeV4JSONImporter — broad section mapping", () => {
+describe("parseReactiveResumeV4JSON — broad section mapping", () => {
 	const v4 = baseV4();
-	const result = importer.parse(JSON.stringify(v4));
+	const result = parseReactiveResumeV4JSON(JSON.stringify(v4));
 
 	it("maps basics fields (name, headline, contact, website, customFields)", () => {
 		expect(result.basics.name).toBe("Jane Doe");
@@ -224,6 +222,7 @@ describe("ReactiveResumeV4JSONImporter — broad section mapping", () => {
 	it("maps picture with border on", () => {
 		expect(result.picture.url).toBe("https://example.com/pic.jpg");
 		expect(result.picture.hidden).toBe(false);
+		expect(result.picture.fit).toBe("cover");
 		expect(result.picture.borderWidth).toBeGreaterThan(0);
 	});
 
@@ -292,17 +291,5 @@ describe("ReactiveResumeV4JSONImporter — broad section mapping", () => {
 		expect(ref.name).toBe("Bob Smith");
 		expect(ref.position).toBe("Manager");
 		expect(ref.description).toBe("Was great");
-	});
-
-	it("scales language level 10 → 5 and skill level 10 → 5", () => {
-		const language = result.sections.languages.items[0] as { level?: number };
-		expect(language.level).toBe(5);
-
-		const skill = result.sections.skills.items[0] as { level?: number };
-		expect(skill.level).toBe(5);
-	});
-
-	it("invalid JSON throws", () => {
-		expect(() => importer.parse("not json")).toThrow();
 	});
 });

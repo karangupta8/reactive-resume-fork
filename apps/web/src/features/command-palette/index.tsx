@@ -1,7 +1,7 @@
 import { t } from "@lingui/core/macro";
 import { Trans } from "@lingui/react/macro";
 import { useHotkeys } from "@tanstack/react-hotkeys";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Command, CommandEmpty, CommandInput, CommandList } from "@reactive-resume/ui/components/command";
 import {
 	Dialog,
@@ -10,6 +10,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@reactive-resume/ui/components/dialog";
+import { AskCommandGroup } from "./pages/ask";
 import { NavigationCommandGroup } from "./pages/navigation";
 import { PreferencesCommandGroup } from "./pages/preferences";
 import { ResumesCommandGroup } from "./pages/resumes";
@@ -17,10 +18,13 @@ import { useCommandPaletteStore } from "./store";
 
 export function CommandPalette() {
 	const inputRef = useRef<HTMLInputElement>(null);
+	const commandRef = useRef<HTMLDivElement>(null);
+	const [selectedValue, setSelectedValue] = useState("");
 	const { open, search, pages, setOpen, setSearch, goBack } = useCommandPaletteStore();
 
 	const isFirstPage = pages.length === 0;
 	const currentPage = pages[pages.length - 1];
+	const commandListPage = currentPage ?? "root";
 
 	// Toggle command palette with Cmd+K / Ctrl+K
 	useHotkeys([
@@ -32,13 +36,16 @@ export function CommandPalette() {
 		},
 		{
 			hotkey: "Escape",
+			// The editor also binds Escape. `allow` keeps both; `enabled` so a closed palette does not
+			// preventDefault every Escape on the page.
+			options: { enabled: open, conflictBehavior: "allow" },
 			callback: () => {
-				if (!open) return;
 				setOpen(false);
 			},
 		},
 		{
 			hotkey: "Backspace",
+			options: { ignoreInputs: false, preventDefault: false, stopPropagation: false },
 			callback: (event) => {
 				// Only handle if the command palette is open
 				if (!open) return;
@@ -67,6 +74,18 @@ export function CommandPalette() {
 		setSearch(value);
 	};
 
+	useEffect(() => {
+		if (!open) return;
+
+		const firstItem = commandRef.current?.querySelector<HTMLElement>(
+			`[data-command-page="${commandListPage}"] [cmdk-item]:not([aria-disabled="true"])`,
+		);
+		const value = firstItem?.getAttribute("data-value");
+
+		if (value) setSelectedValue(value);
+		inputRef.current?.focus();
+	}, [open, commandListPage]);
+
 	return (
 		<Dialog open={open} onOpenChange={handleOpenChange}>
 			<DialogHeader className="sr-only print:hidden">
@@ -83,6 +102,7 @@ export function CommandPalette() {
 			</DialogHeader>
 
 			<DialogContent
+				instant
 				className="overflow-hidden p-0"
 				aria-label={
 					isFirstPage
@@ -97,12 +117,15 @@ export function CommandPalette() {
 				}
 			>
 				<Command
+					ref={commandRef}
 					loop
+					value={selectedValue}
+					onValueChange={setSelectedValue}
 					aria-label={t({
 						comment: "Accessible label for command list region inside command palette",
 						message: "Command Palette",
 					})}
-					className="[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5 **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group]]:px-2 **:[[cmdk-input]]:h-12 **:[[cmdk-item]]:px-2 **:[[cmdk-item]]:py-3"
+					className="[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5 **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-ink-3 **:[[cmdk-group]]:px-2 **:[[cmdk-input]]:h-12 **:[[cmdk-item]]:px-2 **:[[cmdk-item]]:py-3"
 				>
 					<CommandInput
 						ref={inputRef}
@@ -125,16 +148,17 @@ export function CommandPalette() {
 						})}
 					/>
 
-					<CommandList>
+					<CommandList key={commandListPage} data-command-page={commandListPage}>
 						<CommandEmpty>
 							<Trans comment="Empty-state message when no command palette results match the search query">
-								The command you're looking for doesn't exist.
+								No commands match that search.
 							</Trans>
 						</CommandEmpty>
 
 						<ResumesCommandGroup />
 						<PreferencesCommandGroup />
 						<NavigationCommandGroup />
+						<AskCommandGroup />
 					</CommandList>
 				</Command>
 			</DialogContent>

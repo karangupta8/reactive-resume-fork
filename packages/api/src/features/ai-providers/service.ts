@@ -1,27 +1,25 @@
 import type { AIProvider } from "@reactive-resume/ai/types";
 import { ORPCError } from "@orpc/client";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { aiProviderSchema } from "@reactive-resume/ai/types";
 import { db } from "@reactive-resume/db/client";
 import * as schema from "@reactive-resume/db/schema";
-import {
-	assertCredentialEncryptionConfigured,
-	decryptCredential,
-	encryptCredential,
-	redactEncryptedCredential,
-} from "../ai/credentials";
+import { env } from "@reactive-resume/env/server";
+import { assertCredentialEncryptionConfigured, decryptCredential, encryptCredential } from "../ai/credentials";
 import { testConnection } from "../ai/service";
 import { resolveAiBaseUrl } from "../ai/url-policy";
 
 type AiProviderRecord = typeof schema.aiProvider.$inferSelect;
 
 export type AiProviderResponse = {
+	managed: boolean;
 	id: string;
 	label: string;
 	provider: AIProvider;
 	model: string;
 	baseURL: string | null;
 	enabled: boolean;
+	isDefault: boolean;
 	testStatus: string;
 	testError: string | null;
 	apiKeyPreview: string;
@@ -54,24 +52,21 @@ type UpdateAiProviderInput = {
 
 function toResponse(row: AiProviderRecord): AiProviderResponse {
 	const provider = aiProviderSchema.parse(row.provider);
-	const { apiKeyFingerprint, apiKeyPreview } = redactEncryptedCredential({
-		encryptedApiKey: row.encryptedApiKey,
-		apiKeySalt: row.apiKeySalt,
-		apiKeyHash: row.apiKeyHash,
-		apiKeyPreview: row.apiKeyPreview,
-	});
 
 	return {
+		managed: row.id === serverProviderId(row.userId),
 		id: row.id,
 		label: row.label,
 		provider,
 		model: row.model,
 		baseURL: row.baseUrl,
 		enabled: row.enabled,
+		isDefault: row.isDefault,
 		testStatus: row.testStatus,
 		testError: row.testError,
-		apiKeyPreview,
-		apiKeyFingerprint,
+		apiKeyPreview: row.apiKeyPreview,
+		// The hash identifies the key without revealing it; the ciphertext and salt never leave the server.
+		apiKeyFingerprint: row.apiKeyHash,
 		lastTestedAt: row.lastTestedAt,
 		lastUsedAt: row.lastUsedAt,
 		createdAt: row.createdAt,
@@ -86,11 +81,8 @@ function normalizeBaseUrl(input: { provider: AIProvider; baseURL?: string | null
 	return resolveAiBaseUrl({ provider: input.provider, baseURL: trimmed });
 }
 
-function orderByLastUsedAtDescNullsLast() {
-	return desc(sql<Date>`coalesce(${schema.aiProvider.lastUsedAt}, '1970-01-01T00:00:00.000Z'::timestamptz)`);
-}
-
 async function getOwnedProvider(input: { id: string; userId: string }) {
+	if (input.id === serverProviderId(input.userId)) throw new ORPCError("NOT_FOUND");
 	const [provider] = await db
 		.select()
 		.from(schema.aiProvider)
@@ -102,20 +94,69 @@ async function getOwnedProvider(input: { id: string; userId: string }) {
 	return provider;
 }
 
+const serverProviderId = (userId: string) => `server-ai:${userId}`;
+
+/**
+ * How a connection is picked when nobody chose one: the default, then the most recently used, then the oldest. Lists
+ * use the same order, so the first usable connection on screen is the one the server uses.
+ */
+const automaticOrder = [
+	desc(schema.aiProvider.isDefault),
+	desc(sql<Date>`coalesce(${schema.aiProvider.lastUsedAt}, '1970-01-01T00:00:00.000Z'::timestamptz)`),
+	asc(schema.aiProvider.createdAt),
+];
+
+function assertPersonalProvidersAllowed() {
+	if (env.AI_PROVIDER) throw new ORPCError("FORBIDDEN", { message: "AI is managed by the server." });
+}
+
+/** A persisted reference keeps Assistant thread foreign keys valid; server credentials stay in the environment. */
+async function serverProvider(userId: string) {
+	if (!env.AI_PROVIDER || !env.AI_MODEL) return null;
+	const values = {
+		userId,
+		label: "Server AI",
+		provider: env.AI_PROVIDER,
+		model: env.AI_MODEL,
+		baseUrl: env.AI_BASE_URL ?? null,
+		enabled: true,
+		isDefault: true,
+		testStatus: "success",
+		encryptedApiKey: "",
+		apiKeySalt: "",
+		apiKeyHash: "",
+		apiKeyPreview: "",
+	};
+	const [row] = await db
+		.insert(schema.aiProvider)
+		.values({ id: serverProviderId(userId), ...values })
+		.onConflictDoUpdate({ target: schema.aiProvider.id, set: values })
+		.returning();
+	if (!row) throw new Error("SERVER_AI_PROVIDER_UNAVAILABLE");
+	return { ...toResponse(row), apiKey: env.AI_API_KEY ?? "", baseURL: env.AI_BASE_URL ?? "" };
+}
+
 export const aiProvidersService = {
 	list: async (input: { userId: string }) => {
+		const global = await serverProvider(input.userId);
+		if (global) {
+			const { apiKey: _apiKey, ...response } = global;
+			return [response];
+		}
 		assertCredentialEncryptionConfigured();
 
 		const providers = await db
 			.select()
 			.from(schema.aiProvider)
-			.where(eq(schema.aiProvider.userId, input.userId))
-			.orderBy(orderByLastUsedAtDescNullsLast(), asc(schema.aiProvider.createdAt));
+			.where(and(eq(schema.aiProvider.userId, input.userId), ne(schema.aiProvider.id, serverProviderId(input.userId))))
+			.orderBy(...automaticOrder);
 
 		return providers.map(toResponse);
 	},
 
 	getRunnableById: async (input: { id: string; userId: string }) => {
+		const global = await serverProvider(input.userId);
+		if (global) return global;
 		assertCredentialEncryptionConfigured();
 
 		const provider = await getOwnedProvider(input);
@@ -131,6 +172,8 @@ export const aiProvidersService = {
 	},
 
 	getDefaultRunnable: async (input: { userId: string }) => {
+		const global = await serverProvider(input.userId);
+		if (global) return global;
 		assertCredentialEncryptionConfigured();
 
 		const [provider] = await db
@@ -141,9 +184,10 @@ export const aiProvidersService = {
 					eq(schema.aiProvider.userId, input.userId),
 					eq(schema.aiProvider.enabled, true),
 					eq(schema.aiProvider.testStatus, "success"),
+					ne(schema.aiProvider.id, serverProviderId(input.userId)),
 				),
 			)
-			.orderBy(orderByLastUsedAtDescNullsLast(), asc(schema.aiProvider.createdAt))
+			.orderBy(...automaticOrder)
 			.limit(1);
 
 		return provider
@@ -156,6 +200,7 @@ export const aiProvidersService = {
 	},
 
 	create: async (input: CreateAiProviderInput) => {
+		assertPersonalProvidersAllowed();
 		assertCredentialEncryptionConfigured();
 
 		const encrypted = encryptCredential(input.apiKey.trim());
@@ -177,6 +222,7 @@ export const aiProvidersService = {
 	},
 
 	update: async (input: UpdateAiProviderInput) => {
+		assertPersonalProvidersAllowed();
 		assertCredentialEncryptionConfigured();
 
 		const existing = await getOwnedProvider(input);
@@ -214,6 +260,7 @@ export const aiProvidersService = {
 	},
 
 	delete: async (input: { id: string; userId: string }) => {
+		assertPersonalProvidersAllowed();
 		assertCredentialEncryptionConfigured();
 
 		await db
@@ -222,6 +269,7 @@ export const aiProvidersService = {
 	},
 
 	test: async (input: { id: string; userId: string }) => {
+		assertPersonalProvidersAllowed();
 		assertCredentialEncryptionConfigured();
 
 		const provider = await getOwnedProvider(input);
@@ -229,19 +277,21 @@ export const aiProvidersService = {
 		const apiKey = decryptCredential(provider.encryptedApiKey);
 
 		try {
-			const ok = await testConnection({
+			const result = await testConnection({
 				provider: parsedProvider,
 				model: provider.model,
 				apiKey,
 				baseURL: provider.baseUrl ?? "",
 			});
 
+			// A provider that answers "no" is a completed test, not a failed request: it comes back as
+			// data so the client can show why, instead of a generic transport error.
 			const [updated] = await db
 				.update(schema.aiProvider)
 				.set({
-					enabled: ok,
-					testStatus: ok ? "success" : "failure",
-					testError: ok ? null : "The provider test returned an unexpected response.",
+					enabled: result.ok,
+					testStatus: result.ok ? "success" : "failure",
+					testError: result.ok ? null : result.message,
 					lastTestedAt: new Date(),
 				})
 				.where(and(eq(schema.aiProvider.id, input.id), eq(schema.aiProvider.userId, input.userId)))
@@ -250,7 +300,8 @@ export const aiProvidersService = {
 			if (!updated) throw new ORPCError("NOT_FOUND");
 			return toResponse(updated);
 		} catch (error) {
-			const [updated] = await db
+			// Only unexpected failures reach here now: provider-side outcomes come back as data above.
+			await db
 				.update(schema.aiProvider)
 				.set({
 					enabled: false,
@@ -258,12 +309,33 @@ export const aiProvidersService = {
 					testError: error instanceof Error ? error.message : "Failed to test provider.",
 					lastTestedAt: new Date(),
 				})
-				.where(and(eq(schema.aiProvider.id, input.id), eq(schema.aiProvider.userId, input.userId)))
-				.returning();
+				.where(and(eq(schema.aiProvider.id, input.id), eq(schema.aiProvider.userId, input.userId)));
 
-			if (!updated) throw error;
 			throw error;
 		}
+	},
+
+	/** Makes one tested, switched-on connection the default; the previous default stops being one. */
+	setDefault: async (input: { id: string; userId: string }) => {
+		assertPersonalProvidersAllowed();
+		const provider = await getOwnedProvider(input);
+		if (!provider.enabled || provider.testStatus !== "success")
+			throw new ORPCError("BAD_REQUEST", {
+				message: "Test and switch on this connection before making it the default.",
+			});
+		const [updated] = await db.transaction(async (tx) => {
+			await tx
+				.update(schema.aiProvider)
+				.set({ isDefault: false })
+				.where(and(eq(schema.aiProvider.userId, input.userId), eq(schema.aiProvider.isDefault, true)));
+			return tx
+				.update(schema.aiProvider)
+				.set({ isDefault: true })
+				.where(and(eq(schema.aiProvider.id, input.id), eq(schema.aiProvider.userId, input.userId)))
+				.returning();
+		});
+		if (!updated) throw new ORPCError("NOT_FOUND");
+		return toResponse(updated);
 	},
 
 	markUsed: async (input: { id: string; userId: string }) => {

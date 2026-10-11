@@ -1,4 +1,4 @@
-import type { ResumeData, SectionType } from "@reactive-resume/schema/resume/data";
+import type { LayoutPage, ResumeData, SectionType } from "@reactive-resume/schema/resume/data";
 import type { Template } from "@reactive-resume/schema/templates";
 import {
 	BorderStyle,
@@ -14,7 +14,10 @@ import {
 	TextRun,
 	WidthType,
 } from "docx";
+import { templateLayouts } from "@reactive-resume/schema/templates";
 import { parseColorString } from "@reactive-resume/utils/color";
+import { isRTL } from "@reactive-resume/utils/locale";
+import { shouldShowResumeHeader } from "./cover-letter";
 import { toSafeDocxLink } from "./link-utils";
 import { renderBuiltInSection, renderCustomSection, renderSummary, setRenderConfig } from "./section-renderers";
 
@@ -42,27 +45,9 @@ function ptToTwips(pt: number): number {
 	return Math.round(pt * 20);
 }
 
-// --- Page size constants (in mm) ---
-
-interface PageSize {
-	width: number;
-	height: number;
-}
-
-const DEFAULT_PAGE_SIZE: PageSize = { width: 210, height: 297 };
-
-const PAGE_SIZES = {
-	a4: DEFAULT_PAGE_SIZE,
-	letter: { width: 215.9, height: 279.4 },
-} satisfies Record<string, PageSize>;
-
-type DocxPageFormat = keyof typeof PAGE_SIZES;
-
-const resolveDocxPageFormat = (format: ResumeData["metadata"]["page"]["format"]): DocxPageFormat => {
-	if (format === "letter") return "letter";
-
-	return "a4";
-};
+// DOCX has fixed pages; free-form resumes intentionally fall back to A4.
+const A4_PAGE_SIZE = { width: 210, height: 297 };
+const LETTER_PAGE_SIZE = { width: 215.9, height: 279.4 };
 
 // --- Invisible border preset for table cells ---
 
@@ -73,40 +58,28 @@ const NO_BORDERS = {
 	right: { style: BorderStyle.NONE, size: 0 },
 } as const;
 
-// --- Template layout config ---
+// Sidebar and header placement come from `templateLayouts`, as in the PDF; only the sidebar's background is DOCX's
+// own: "solid" fills it with the primary colour (text inverts), "tint" with 20% of it.
+const SIDEBAR_BACKGROUND: Partial<Record<Template, "solid" | "tint">> = {
+	chikorita: "solid",
+	ditgar: "tint",
+	gengar: "tint",
+	glalie: "tint",
+};
 
-interface TemplateConfig {
-	/** Which side the sidebar appears on */
-	sidebarSide: "left" | "right" | "none";
-	/** Sidebar background: "solid" = full primary color, "tint" = 20% opacity, "none" = no background */
-	sidebarBackground: "solid" | "tint" | "none";
-	/** Where the header is rendered */
-	headerPosition: "full-width" | "main-only" | "sidebar-only";
+type PagePlan = { kind: "single"; sections: string[] } | { kind: "split" };
+
+/**
+ * How a layout page prints, as in the PDF: a full-width page prints no sidebar, a one-column template prints its
+ * sidebar sections after the main ones, and only a two-column template with sidebar sections splits the page.
+ */
+export function planPageColumns(page: LayoutPage, template: Template): PagePlan {
+	const sidebar = page.fullWidth ? [] : page.sidebar;
+	if (templateLayouts[template].columns === 1 || sidebar.length === 0) {
+		return { kind: "single", sections: [...page.main, ...sidebar] };
+	}
+	return { kind: "split" };
 }
-
-const TEMPLATE_CONFIGS: Record<Template, TemplateConfig> = {
-	azurill: { sidebarSide: "left", sidebarBackground: "none", headerPosition: "full-width" },
-	bronzor: { sidebarSide: "right", sidebarBackground: "none", headerPosition: "full-width" },
-	chikorita: { sidebarSide: "right", sidebarBackground: "solid", headerPosition: "main-only" },
-	ditgar: { sidebarSide: "left", sidebarBackground: "tint", headerPosition: "sidebar-only" },
-	ditto: { sidebarSide: "left", sidebarBackground: "none", headerPosition: "full-width" },
-	gengar: { sidebarSide: "left", sidebarBackground: "tint", headerPosition: "sidebar-only" },
-	glalie: { sidebarSide: "left", sidebarBackground: "tint", headerPosition: "sidebar-only" },
-	kakuna: { sidebarSide: "right", sidebarBackground: "none", headerPosition: "full-width" },
-	lapras: { sidebarSide: "right", sidebarBackground: "none", headerPosition: "full-width" },
-	leafish: { sidebarSide: "right", sidebarBackground: "none", headerPosition: "full-width" },
-	meowth: { sidebarSide: "left", sidebarBackground: "none", headerPosition: "full-width" },
-	onyx: { sidebarSide: "right", sidebarBackground: "none", headerPosition: "full-width" },
-	pikachu: { sidebarSide: "left", sidebarBackground: "none", headerPosition: "main-only" },
-	rhyhorn: { sidebarSide: "right", sidebarBackground: "none", headerPosition: "full-width" },
-	scizor: { sidebarSide: "left", sidebarBackground: "none", headerPosition: "full-width" },
-};
-
-const DEFAULT_TEMPLATE_CONFIG: TemplateConfig = {
-	sidebarSide: "left",
-	sidebarBackground: "none",
-	headerPosition: "full-width",
-};
 
 /**
  * Blends a hex color toward white at the given opacity (0-1).
@@ -122,37 +95,36 @@ function blendWithWhite(hex: string, opacity: number): string {
 
 // --- Section rendering dispatch ---
 
-const BUILT_IN_SECTIONS = new Set<string>([
-	"profiles",
-	"experience",
-	"education",
-	"projects",
-	"skills",
-	"languages",
-	"interests",
-	"awards",
-	"certifications",
-	"publications",
-	"volunteer",
-	"references",
-]);
+/** Resolves a section's (usually empty) stored title from its id — locale-aware, supplied by the caller. */
+export type SectionTitleResolver = (sectionId: string) => string | undefined;
 
-function renderSection(sectionId: string, data: ResumeData, colorHex: string): Paragraph[] {
+function renderSection(
+	sectionId: string,
+	data: ResumeData,
+	colorHex: string,
+	resolveTitle?: SectionTitleResolver,
+): Paragraph[] {
+	const titled = <T extends { title: string }>(section: T): T => ({
+		...section,
+		title: resolveTitle?.(sectionId)?.trim() || section.title,
+	});
+
 	if (sectionId === "summary") {
-		return renderSummary(data.summary, colorHex);
+		return renderSummary(titled(data.summary), colorHex);
 	}
 
-	if (BUILT_IN_SECTIONS.has(sectionId)) {
+	// ponytail: data.sections keys are the source of truth; no need to maintain a parallel Set
+	if (sectionId in data.sections) {
 		const section = data.sections[sectionId as SectionType];
 		if (section) {
-			return renderBuiltInSection(sectionId as SectionType, section, colorHex);
+			return renderBuiltInSection(sectionId as SectionType, titled(section), colorHex);
 		}
 		return [];
 	}
 
 	const customSection = data.customSections.find((cs) => cs.id === sectionId);
 	if (customSection) {
-		return renderCustomSection(customSection, colorHex);
+		return renderCustomSection(titled(customSection), colorHex);
 	}
 
 	return [];
@@ -304,7 +276,7 @@ function buildTwoColumnTable(
 	sidebarParagraphs: Paragraph[],
 	sidebarWidthPct: number,
 	gapXTwips: number,
-	sidebarSide: "left" | "right" | "none",
+	sidebarSide: "left" | "right",
 	sidebarShadingHex?: string,
 ): Table {
 	const mainWidthPct = 100 - sidebarWidthPct;
@@ -319,11 +291,8 @@ function buildTwoColumnTable(
 
 	const margins: { right?: number; left?: number } = {};
 
-	if (sidebarSide === "left") {
-		margins.right = gapXTwips;
-	} else if (sidebarSide === "right") {
-		margins.left = gapXTwips;
-	}
+	if (sidebarSide === "left") margins.right = gapXTwips;
+	else margins.left = gapXTwips;
 
 	const sidebarCell = new TableCell({
 		width: { size: sidebarWidthPct, type: WidthType.PERCENTAGE },
@@ -366,7 +335,7 @@ function buildTwoColumnTable(
  * - Page margins and fixed DOCX page format from `metadata.page`; free-form exports as A4
  * - Primary, text, and background colors from `metadata.design.colors`
  */
-export function buildDocument(data: ResumeData): Document {
+export function buildDocument(data: ResumeData, resolveTitle?: SectionTitleResolver): Document {
 	const colorHex = getColorHex(data.metadata.design.colors.primary, "DC2626");
 	const textColorHex = getColorHex(data.metadata.design.colors.text, "000000");
 	const bgColorHex = getColorHex(data.metadata.design.colors.background, "FFFFFF");
@@ -376,7 +345,7 @@ export function buildDocument(data: ResumeData): Document {
 	const lineSpacing = Math.round(data.metadata.typography.body.lineHeight * 240);
 
 	const { page } = data.metadata;
-	const pageSize = PAGE_SIZES[resolveDocxPageFormat(page.format)];
+	const pageSize = page.format === "letter" ? LETTER_PAGE_SIZE : A4_PAGE_SIZE;
 	// Margins and gaps are defined in points (pt), not mm
 	const marginXTwips = ptToTwips(page.marginX);
 	const marginYTwips = ptToTwips(page.marginY);
@@ -384,20 +353,13 @@ export function buildDocument(data: ResumeData): Document {
 
 	const sidebarWidth = data.metadata.layout.sidebarWidth;
 
-	// Template-aware layout config
-	const templateConfig = TEMPLATE_CONFIGS[data.metadata.template] ?? DEFAULT_TEMPLATE_CONFIG;
-
-	// Compute sidebar background shading hex
-	let sidebarShadingHex: string | undefined;
-	if (templateConfig.sidebarBackground === "solid") {
-		sidebarShadingHex = colorHex;
-	} else if (templateConfig.sidebarBackground === "tint") {
-		sidebarShadingHex = blendWithWhite(colorHex, 0.2);
-	}
-
-	// Determine sidebar text colors — inverted when sidebar has a solid background
-	const sidebarTextColorHex = templateConfig.sidebarBackground === "solid" ? bgColorHex : textColorHex;
-	const sidebarHeadingColorHex = templateConfig.sidebarBackground === "solid" ? bgColorHex : colorHex;
+	const layout = templateLayouts[data.metadata.template];
+	const background = SIDEBAR_BACKGROUND[data.metadata.template];
+	const sidebarShadingHex =
+		background === "solid" ? colorHex : background === "tint" ? blendWithWhite(colorHex, 0.2) : undefined;
+	// Text on a solid sidebar inverts.
+	const sidebarTextColorHex = background === "solid" ? bgColorHex : textColorHex;
+	const sidebarHeadingColorHex = background === "solid" ? bgColorHex : colorHex;
 
 	// Configure heading typography for section renderers
 	const headingFont = data.metadata.typography.heading.fontFamily || "Calibri";
@@ -405,71 +367,53 @@ export function buildDocument(data: ResumeData): Document {
 
 	const documentChildren: (Paragraph | Table)[] = [];
 
+	// ponytail: hoisted once; sidebar call spreads only the two differing color keys
+	const mainConfig = {
+		headingFont,
+		headingSizeHalfPt: headingSize,
+		bodyFont,
+		bodySizeHalfPt: bodySize,
+		textColorHex,
+		primaryColorHex: colorHex,
+	};
+	const showHeader = shouldShowResumeHeader(data);
+
 	// Header placement depends on template
-	if (templateConfig.headerPosition === "full-width") {
-		// Configure colors for main content
-		setRenderConfig({
-			headingFont,
-			headingSizeHalfPt: headingSize,
-			bodyFont,
-			bodySizeHalfPt: bodySize,
-			textColorHex,
-			primaryColorHex: colorHex,
-		});
+	if (layout.headerPlacement === "full-width" && showHeader) {
+		setRenderConfig(mainConfig);
 		documentChildren.push(...buildHeader(data, colorHex, textColorHex));
 	}
 
 	// Process each page in the layout
 	for (const layoutPage of data.metadata.layout.pages) {
-		const isFullWidth = layoutPage.fullWidth || layoutPage.sidebar.length === 0;
+		const plan = planPageColumns(layoutPage, data.metadata.template);
 
-		if (isFullWidth) {
-			setRenderConfig({
-				headingFont,
-				headingSizeHalfPt: headingSize,
-				bodyFont,
-				bodySizeHalfPt: bodySize,
-				textColorHex,
-				primaryColorHex: colorHex,
-			});
-			for (const sectionId of [...layoutPage.main, ...layoutPage.sidebar]) {
-				documentChildren.push(...renderSection(sectionId, data, colorHex));
+		if (plan.kind === "single") {
+			setRenderConfig(mainConfig);
+			for (const sectionId of plan.sections) {
+				documentChildren.push(...renderSection(sectionId, data, colorHex, resolveTitle));
 			}
 		} else {
 			// Render main sections with normal colors
-			setRenderConfig({
-				headingFont,
-				headingSizeHalfPt: headingSize,
-				bodyFont,
-				bodySizeHalfPt: bodySize,
-				textColorHex,
-				primaryColorHex: colorHex,
-			});
+			setRenderConfig(mainConfig);
 
 			const mainParagraphs: Paragraph[] = [];
-			if (templateConfig.headerPosition === "main-only") {
+			if (layout.headerPlacement === "main-only" && showHeader) {
 				mainParagraphs.push(...buildHeader(data, colorHex, textColorHex));
 			}
 			for (const sectionId of layoutPage.main) {
-				mainParagraphs.push(...renderSection(sectionId, data, colorHex));
+				mainParagraphs.push(...renderSection(sectionId, data, colorHex, resolveTitle));
 			}
 
 			// Render sidebar sections with potentially inverted colors
-			setRenderConfig({
-				headingFont,
-				headingSizeHalfPt: headingSize,
-				bodyFont,
-				bodySizeHalfPt: bodySize,
-				textColorHex: sidebarTextColorHex,
-				primaryColorHex: sidebarHeadingColorHex,
-			});
+			setRenderConfig({ ...mainConfig, textColorHex: sidebarTextColorHex, primaryColorHex: sidebarHeadingColorHex });
 
 			const sidebarParagraphs: Paragraph[] = [];
-			if (templateConfig.headerPosition === "sidebar-only") {
+			if (layout.headerPlacement === "sidebar-only" && showHeader) {
 				sidebarParagraphs.push(...buildHeader(data, sidebarHeadingColorHex, sidebarTextColorHex));
 			}
 			for (const sectionId of layoutPage.sidebar) {
-				sidebarParagraphs.push(...renderSection(sectionId, data, sidebarHeadingColorHex));
+				sidebarParagraphs.push(...renderSection(sectionId, data, sidebarHeadingColorHex, resolveTitle));
 			}
 
 			if (mainParagraphs.length > 0 || sidebarParagraphs.length > 0) {
@@ -479,7 +423,8 @@ export function buildDocument(data: ResumeData): Document {
 						sidebarParagraphs,
 						sidebarWidth,
 						gapXTwips,
-						templateConfig.sidebarSide,
+						// The side chosen in Design, else the template's own.
+						data.metadata.layout.sidebarSide ?? layout.sidebarSide ?? "left",
 						sidebarShadingHex,
 					),
 				);
@@ -498,6 +443,7 @@ export function buildDocument(data: ResumeData): Document {
 					},
 					paragraph: {
 						spacing: { line: lineSpacing },
+						...(isRTL(page.locale) ? { bidirectional: true } : {}),
 					},
 				},
 			},

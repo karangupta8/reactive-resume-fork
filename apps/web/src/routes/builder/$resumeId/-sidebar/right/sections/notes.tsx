@@ -1,7 +1,8 @@
+import { t } from "@lingui/core/macro";
 import { Trans } from "@lingui/react/macro";
-import { RichInput } from "@/components/input/rich-input";
-import { useCurrentResume, useUpdateResumeData } from "@/features/resume/builder/draft";
 import { SectionBase } from "../shared/section-base";
+import { useCurrentResume, useUpdateResumeData } from "@/features/resume/builder/draft";
+import { RichTextEditor } from "@/features/resume/editor/write/rich-text-editor";
 
 export function NotesSectionBuilder() {
 	return (
@@ -25,19 +26,13 @@ function NotesSectionForm() {
 	return (
 		<div className="space-y-4">
 			<p>
-				<Trans>
-					This section is reserved for your personal notes specific to this resume. The content here remains private and
-					is not shared with anyone else.
-				</Trans>
+				<Trans>Keep private notes about this resume here. Nobody else can see them.</Trans>
 			</p>
 
-			<RichInput value={notes} onChange={onChange} />
+			<RichTextEditor label={t`Notes`} value={notes} onChange={onChange} disabled={resume.isLocked} />
 
-			<p className="text-muted-foreground">
-				<Trans>
-					For example, information regarding which companies you sent this resume to or the links to the job
-					descriptions can be noted down here.
-				</Trans>
+			<p className="text-ink-3">
+				<Trans>For example, note which companies you sent this resume to, or links to the job descriptions.</Trans>
 			</p>
 		</div>
 	);

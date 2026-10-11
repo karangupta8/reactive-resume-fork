@@ -1,20 +1,19 @@
-import type { Style } from "@react-pdf/types";
 import type { TemplatePageProps } from "../../document";
+import type { Style } from "../../forme/style-types";
 import type { TemplateColorRoles, TemplateFeatures, TemplateStyleContext, TemplateStyleSlots } from "../shared/types";
 import { useMemo } from "react";
-import { parseColorString, rgbaStringToHex } from "@reactive-resume/utils/color";
+import { Page, StyleSheet, View } from "#react-pdf-renderer";
 import { useRender } from "../../context";
-import { Image, Page, StyleSheet, View } from "../../renderer";
-import { CustomFieldContactItem, WebsiteContactItem } from "../shared/contact-item";
+import { useRenderedSectionIds, useResolvedNode } from "../../semantic/context";
+import { semanticNodeKeys } from "../../semantic/node-keys";
+import { getPrimaryTint } from "../shared/color-helpers";
 import { TemplateProvider } from "../shared/context";
 import { filterSections } from "../shared/filtering";
 import { getTemplateMetrics } from "../shared/metrics";
-import { getTemplatePageMinHeightStyle, getTemplatePageSize } from "../shared/page-size";
-import { hasTemplatePicture } from "../shared/picture";
-import { Heading, Icon, Link, Text } from "../shared/primitives";
-import { createRtlStyleHelpers } from "../shared/rtl";
+import { SemanticRegionView, SemanticTemplatePartView } from "../shared/primitives";
 import { Section } from "../shared/sections";
 import { composeStyles, headerNameLineHeight, resolvePlacementColor } from "../shared/styles";
+import { createIconSlot, TemplateHeader, useTemplateBase } from "../shared/template-base";
 
 type GlalieStyles = Omit<TemplateStyleSlots, "page"> & {
 	page: Style;
@@ -31,6 +30,7 @@ type GlalieStyles = Omit<TemplateStyleSlots, "page"> & {
 	headerName: Style;
 	contactList: Style;
 	contactItem: Style;
+	contactText: Style;
 };
 
 type GlalieTemplate = {
@@ -46,24 +46,39 @@ const glalieFeatures = {
 	stackSidebarItemHeader: true,
 } satisfies TemplateFeatures;
 
-export const GlaliePage = ({ page, pageIndex }: TemplatePageProps) => {
+export const GlaliePage = ({ page, pageSize, pageMinHeightStyle, showHeader, pageNumber }: TemplatePageProps) => {
 	const data = useRender();
+	const pageNodeKey = semanticNodeKeys.page(pageNumber);
+	const { style: semanticPageStyle, size: semanticPageSize, ...semanticPageProps } = useResolvedNode(pageNodeKey);
 	const { metadata } = data;
 	const { colors, styles } = useGlalieTemplate();
 	const metrics = getTemplateMetrics(metadata.page);
-	const pageSize = getTemplatePageSize(metadata.page.format);
-	const pageMinHeightStyle = getTemplatePageMinHeightStyle(metadata.page.format);
-	const showHeader = pageIndex === 0;
 	const showSidebar = !page.fullWidth || showHeader;
-	const mainSections = filterSections(page.main, data);
-	const sidebarSections = filterSections(page.sidebar, data);
+	const mainSections = useRenderedSectionIds(pageNodeKey, filterSections(page.main, data));
+	const sidebarSections = useRenderedSectionIds(pageNodeKey, filterSections(page.sidebar, data));
 
 	return (
-		<Page size={pageSize} style={composeStyles(styles.page, pageMinHeightStyle)}>
-			<TemplateProvider styles={styles} colors={colors} features={glalieFeatures}>
-				{showSidebar && <View style={styles.sidebarBackground} />}
+		<Page
+			{...semanticPageProps}
+			size={semanticPageSize ?? pageSize}
+			style={composeStyles(
+				styles.page,
+				{ paddingVertical: metrics.page.paddingVertical },
+				pageMinHeightStyle,
+				semanticPageStyle,
+			)}
+		>
+			<TemplateProvider pageNodeKey={pageNodeKey} styles={styles} colors={colors} features={glalieFeatures}>
+				{showSidebar && (
+					<SemanticTemplatePartView
+						ownerNodeKey={semanticNodeKeys.region(pageNodeKey, "sidebar")}
+						partKeys={["sidebar-background"]}
+						fixed
+						style={styles.sidebarBackground}
+					/>
+				)}
 
-				<View style={styles.layout}>
+				<View style={composeStyles(styles.layout, { marginTop: -metrics.page.paddingVertical })}>
 					{showSidebar && (
 						<View
 							style={composeStyles(styles.sidebarColumn, {
@@ -73,21 +88,24 @@ export const GlaliePage = ({ page, pageIndex }: TemplatePageProps) => {
 							{showHeader && <Header styles={styles} />}
 
 							{!page.fullWidth && (
-								<View style={composeStyles(styles.sidebarContent, { rowGap: metrics.sectionGap })}>
+								<SemanticRegionView
+									region="sidebar"
+									style={composeStyles(styles.sidebarContent, { rowGap: metrics.sectionGap })}
+								>
 									{sidebarSections.map((section) => (
 										<Section key={section} section={section} placement="sidebar" />
 									))}
-								</View>
+								</SemanticRegionView>
 							)}
 						</View>
 					)}
 
 					<View style={styles.mainColumn}>
-						<View style={composeStyles(styles.mainContent, { rowGap: metrics.sectionGap })}>
+						<SemanticRegionView region="main" style={composeStyles(styles.mainContent, { rowGap: metrics.sectionGap })}>
 							{mainSections.map((section) => (
 								<Section key={section} section={section} placement="main" />
 							))}
-						</View>
+						</SemanticRegionView>
 					</View>
 				</View>
 			</TemplateProvider>
@@ -95,68 +113,29 @@ export const GlaliePage = ({ page, pageIndex }: TemplatePageProps) => {
 	);
 };
 
-const Header = ({ styles }: GlalieHeaderProps) => {
-	const { basics, picture } = useRender();
-	const hasPicture = hasTemplatePicture(picture);
-
-	return (
-		<View style={styles.header}>
-			{hasPicture && <Image src={picture.url} style={styles.picture} />}
-
-			<View style={styles.headerTitle}>
-				<View style={styles.headerIdentity}>
-					<Heading style={styles.headerName}>{basics.name}</Heading>
-					<Text>{basics.headline}</Text>
-				</View>
-			</View>
-
-			<View style={styles.contactList}>
-				{basics.email && (
-					<Link src={`mailto:${basics.email}`} style={styles.contactItem}>
-						<Icon name="envelope" />
-						<Text>{basics.email}</Text>
-					</Link>
-				)}
-				{basics.phone && (
-					<Link src={`tel:${basics.phone}`} style={styles.contactItem}>
-						<Icon name="phone" />
-						<Text>{basics.phone}</Text>
-					</Link>
-				)}
-				{basics.location && (
-					<View style={styles.contactItem}>
-						<Icon name="map-pin" />
-						<Text>{basics.location}</Text>
-					</View>
-				)}
-				<WebsiteContactItem website={basics.website} style={styles.contactItem} />
-				{basics.customFields.map((field) => (
-					<CustomFieldContactItem key={field.id} field={field} style={styles.contactItem} />
-				))}
-			</View>
-		</View>
-	);
-};
-
-const getPrimaryTint = (primaryColor: string, opacity: number): string => {
-	const primary = parseColorString(primaryColor);
-
-	if (!primary) return rgbaStringToHex(primaryColor);
-
-	const alpha = Math.max(0, Math.min(1, primary.a * opacity));
-
-	return `rgba(${primary.r}, ${primary.g}, ${primary.b}, ${alpha})`;
-};
+const Header = ({ styles }: GlalieHeaderProps) => (
+	<TemplateHeader
+		styles={{
+			header: styles.header,
+			picture: styles.picture,
+			title: styles.headerTitle,
+			identity: styles.headerIdentity,
+			name: styles.headerName,
+			contactList: styles.contactList,
+			contactItem: styles.contactItem,
+			contactText: styles.contactText,
+		}}
+		contactListOutsideTitle
+	/>
+);
 
 const useGlalieTemplate = (): GlalieTemplate => {
-	const { picture, metadata, rtl } = useRender();
+	const { metadata, r, foreground, background, primary, metrics, base } = useTemplateBase();
 
 	return useMemo(() => {
-		const r = createRtlStyleHelpers(rtl);
-		const foreground = rgbaStringToHex(metadata.design.colors.text);
-		const background = rgbaStringToHex(metadata.design.colors.background);
-		const primary = rgbaStringToHex(metadata.design.colors.primary);
-		const primaryTint = getPrimaryTint(metadata.design.colors.primary, 0.2);
+		// One band at the tint the former column-over-band pair of 20% layers added up to: the column no longer paints
+		// its own, so a custom band colour shows as authored, margins included.
+		const primaryTint = getPrimaryTint(metadata.design.colors.primary, 0.36);
 		const colors: TemplateColorRoles = {
 			foreground,
 			background,
@@ -164,82 +143,9 @@ const useGlalieTemplate = (): GlalieTemplate => {
 			sidebarForeground: foreground,
 			sidebarBackground: primaryTint,
 		};
-		const metrics = getTemplateMetrics(metadata.page);
-
-		const bodyText = {
-			fontFamily: metadata.typography.body.fontFamily,
-			fontSize: metadata.typography.body.fontSize,
-			fontWeight: metadata.typography.body.fontWeights[0] ?? "400",
-			lineHeight: metadata.typography.body.lineHeight,
-			color: foreground,
-			...r.text,
-		} satisfies Style;
 
 		const baseStyles = StyleSheet.create({
-			page: {
-				color: foreground,
-				backgroundColor: background,
-				fontFamily: metadata.typography.body.fontFamily,
-				fontSize: metadata.typography.body.fontSize,
-				lineHeight: metadata.typography.body.lineHeight,
-				direction: r.pageDirection,
-			},
-			text: bodyText,
-			heading: {
-				fontFamily: metadata.typography.heading.fontFamily,
-				fontSize: metadata.typography.heading.fontSize,
-				fontWeight: metadata.typography.heading.fontWeights.at(-1) ?? "600",
-				lineHeight: metadata.typography.heading.lineHeight,
-				color: foreground,
-				...r.text,
-			},
-			div: {
-				rowGap: metrics.gapY(0.125),
-				columnGap: metrics.gapX(1 / 3),
-			},
-			inline: {
-				flexDirection: r.row,
-				alignItems: "center",
-				columnGap: metrics.gapX(1 / 3),
-			},
-			link: {
-				textDecoration: "none",
-				color: foreground,
-			},
-			small: {
-				fontSize: metadata.typography.body.fontSize * 0.875,
-			},
-			bold: {
-				fontWeight: metadata.typography.body.fontWeights.at(-1) ?? "600",
-			},
-			richParagraph: {
-				margin: 0,
-				...bodyText,
-			},
-			richListItemRow: {
-				flexDirection: "row",
-				columnGap: metrics.gapX(1 / 3),
-				alignItems: "flex-start",
-			},
-			richListItemMarker: {
-				...bodyText,
-				width: metadata.typography.body.fontSize,
-				textAlign: r.listMarkerTextAlign,
-			},
-			richListItemContent: {
-				...bodyText,
-				flex: 1,
-			},
-			splitRow: {
-				flexDirection: r.row,
-				flexWrap: "wrap",
-				alignItems: "flex-start",
-				justifyContent: "space-between",
-				columnGap: metrics.gapX(2 / 3),
-			},
-			alignEnd: {
-				...r.alignEnd,
-			},
+			...base,
 			section: {
 				flexDirection: "column",
 				rowGap: metrics.gapY(0.25),
@@ -264,17 +170,15 @@ const useGlalieTemplate = (): GlalieTemplate => {
 				position: "absolute",
 				top: 0,
 				bottom: 0,
-				...r.anchorToStart(0),
+				...r.anchorToColumnStart(0),
 				width: `${metadata.layout.sidebarWidth}%`,
 				backgroundColor: primaryTint,
 			},
 			layout: {
-				flexDirection: r.row,
+				flexDirection: r.columns,
 				minHeight: "100%",
 			},
 			sidebarColumn: {
-				zIndex: 1,
-				backgroundColor: primaryTint,
 				paddingHorizontal: metrics.page.paddingHorizontal,
 				paddingTop: metrics.page.paddingVertical,
 				rowGap: metrics.sectionGap,
@@ -284,7 +188,6 @@ const useGlalieTemplate = (): GlalieTemplate => {
 			},
 			mainColumn: {
 				flex: 1,
-				zIndex: 1,
 			},
 			mainContent: {
 				paddingHorizontal: metrics.page.paddingHorizontal,
@@ -293,18 +196,6 @@ const useGlalieTemplate = (): GlalieTemplate => {
 			header: {
 				alignItems: "center",
 				rowGap: metrics.gapY(0.5),
-			},
-			picture: {
-				width: picture.size,
-				height: picture.size,
-				objectFit: "cover",
-				aspectRatio: picture.aspectRatio,
-				borderRadius: picture.borderRadius,
-				borderColor: rgbaStringToHex(picture.borderColor),
-				borderWidth: picture.borderWidth,
-				shadowColor: rgbaStringToHex(picture.shadowColor),
-				shadowWidth: picture.shadowWidth,
-				transform: `rotate(${picture.rotation}deg)`,
 			},
 			headerTitle: {
 				alignItems: "center",
@@ -332,6 +223,11 @@ const useGlalieTemplate = (): GlalieTemplate => {
 				alignItems: "center",
 				columnGap: metrics.gapX(1 / 6),
 			},
+			// The text takes the rest of the row, so a long email or link wraps inside the box instead of running out.
+			contactText: {
+				flexGrow: 1,
+				flexBasis: 0,
+			},
 		});
 
 		const accentFor = ({ colors }: TemplateStyleContext) => colors.primary;
@@ -346,18 +242,14 @@ const useGlalieTemplate = (): GlalieTemplate => {
 			colors,
 			styles: {
 				...baseStyles,
-				text: (context) => ({ ...bodyText, color: foregroundFor(context) }),
+				text: (context) => ({ ...base.text, color: foregroundFor(context) }),
 				heading: (context) => ({ ...baseStyles.heading, color: foregroundFor(context) }),
 				link: (context) => ({ ...baseStyles.link, color: foregroundFor(context) }),
 				sectionHeading: (context) => ({ ...baseStyles.sectionHeading, color: accentFor(context) }),
 				levelItem: (context) => ({ borderColor: accentFor(context) }),
 				levelItemActive: (context) => ({ backgroundColor: accentFor(context) }),
-				icon: (context) => ({
-					display: metadata.page.hideIcons ? "none" : "flex",
-					size: metadata.typography.body.fontSize,
-					color: accentFor(context),
-				}),
+				icon: createIconSlot({ metadata, accentFor }),
 			} satisfies GlalieStyles,
 		};
-	}, [picture, metadata, rtl]);
+	}, [metadata, r, primary, metrics, base, foreground, background]);
 };

@@ -3,13 +3,18 @@ import type { Locale } from "@reactive-resume/utils/locale";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import Cookies from "js-cookie";
-import { isRTL, localeSchema } from "@reactive-resume/utils/locale";
-
-export { isRTL };
+import { defaultLocale, isLocale } from "@reactive-resume/utils/locale";
 
 const storageKey = "locale";
-const defaultLocale: Locale = "en-US";
 const messageLoaders = import.meta.glob<{ messages: Messages }>("../../locales/*.po");
+const relativeTimeDivisions: Array<{ amount: number; unit: Intl.RelativeTimeFormatUnit }> = [
+	{ amount: 31_536_000_000, unit: "year" },
+	{ amount: 2_592_000_000, unit: "month" },
+	{ amount: 604_800_000, unit: "week" },
+	{ amount: 86_400_000, unit: "day" },
+	{ amount: 3_600_000, unit: "hour" },
+	{ amount: 60_000, unit: "minute" },
+];
 
 export const localeMap = {
 	"af-ZA": msg`Afrikaans`,
@@ -69,22 +74,46 @@ export const localeMap = {
 	"zu-ZA": msg`Zulu`,
 } satisfies Record<Locale, MessageDescriptor>;
 
-export function isLocale(locale: string): locale is Locale {
-	return localeSchema.safeParse(locale).success;
-}
-
 export const resolveLocale = (locale: string): Locale => {
 	return isLocale(locale) ? locale : defaultLocale;
 };
 
+// Changing the locale reloads the page (`changeLocale`), so one formatter per locale is enough.
+const relativeTimeFormatters = new Map<string, Intl.RelativeTimeFormat>();
+
+function getRelativeTimeFormatter(locale: string) {
+	let formatter = relativeTimeFormatters.get(locale);
+	if (!formatter) {
+		formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+		relativeTimeFormatters.set(locale, formatter);
+	}
+	return formatter;
+}
+
+export function formatRelativeTime(value: Date | string, locale: string) {
+	const formatter = getRelativeTimeFormatter(locale);
+	const date = value instanceof Date ? value : new Date(value);
+	const diffMs = date.getTime() - Date.now();
+	if (Number.isNaN(diffMs)) return formatter.format(0, "second");
+
+	const division = relativeTimeDivisions.find((candidate) => Math.abs(diffMs) >= candidate.amount);
+
+	return division
+		? formatter.format(Math.round(diffMs / division.amount), division.unit)
+		: formatter.format(0, "second");
+}
+
 export const getLocale = () => {
+	// A `?locale=` address (the homepage's hreflang alternates) picks the language and keeps it, like the switcher.
+	const requested = new URLSearchParams(window.location.search).get(storageKey);
+	if (isLocale(requested)) {
+		Cookies.set(storageKey, requested);
+		return requested;
+	}
+
 	const locale = Cookies.get(storageKey);
 	if (!locale || !isLocale(locale)) return defaultLocale;
 	return locale;
-};
-
-export const setLocaleCookie = (locale: Locale) => {
-	Cookies.set(storageKey, locale);
 };
 
 const loadMessages = async (locale: Locale) => {
@@ -110,6 +139,14 @@ export const getLocaleMessages = async (locale: string) => {
 };
 
 export const loadLocale = async (locale: string) => {
+	// Re-activating the active locale emits "change" and re-renders every translated component.
+	if (i18n.locale === locale) return;
 	const { locale: resolvedLocale, messages } = await getLocaleMessages(locale);
 	i18n.loadAndActivate({ locale: resolvedLocale, messages });
+};
+
+export const changeLocale = (value: string | null) => {
+	if (!value || !isLocale(value)) return;
+	Cookies.set(storageKey, value);
+	window.location.reload();
 };

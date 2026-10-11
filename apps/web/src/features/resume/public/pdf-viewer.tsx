@@ -5,6 +5,7 @@ import { EventBus, LinkTarget, PDFLinkService, PDFViewer } from "pdfjs-dist/lega
 import { useEffect, useReducer, useRef } from "react";
 import { Spinner } from "@reactive-resume/ui/components/spinner";
 import { cn } from "@reactive-resume/utils/style";
+import { resolvePublicResumePdfBlob } from "./public-pdf";
 import { createResumePdfBlob } from "@/features/resume/export/pdf-document";
 import "pdfjs-dist/legacy/web/pdf_viewer.css";
 import "./pdf-viewer.css";
@@ -13,8 +14,12 @@ GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.
 
 type PdfViewerProps = {
 	className?: string;
-	data: ResumeData;
-};
+	includeCoverLetterHeader?: boolean;
+	publicResume?: {
+		username: string;
+		slug: string;
+	};
+} & ({ data: ResumeData; file?: never } | { file: Blob; data?: never });
 
 type PdfViewerOptions = ConstructorParameters<typeof PDFViewer>[0] & {
 	abortSignal: AbortSignal;
@@ -61,13 +66,20 @@ function pdfViewerReducer(state: PdfViewerState, action: PdfViewerAction): PdfVi
 				? { ...state, viewerHeight: action.height }
 				: state;
 		case "ready":
-			return { ...state, isReady: true };
+			return state.isReady ? state : { ...state, isReady: true };
 		case "error":
 			return { ...state, error: true, isReady: false };
 	}
 }
 
-export function PdfViewer({ className, data }: PdfViewerProps) {
+/** Renders a resume's PDF from its data, or an existing PDF file (the ATS checker's upload). */
+export function PdfViewer({
+	className,
+	data,
+	file: givenFile,
+	publicResume,
+	includeCoverLetterHeader,
+}: PdfViewerProps) {
 	const rootRef = useRef<HTMLDivElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const viewerRef = useRef<HTMLDivElement>(null);
@@ -83,7 +95,16 @@ export function PdfViewer({ className, data }: PdfViewerProps) {
 		fileRef.current = null;
 		dispatch({ type: "resetForData" });
 
-		void createResumePdfBlob(data)
+		const createPdf = (): Promise<Blob> => {
+			if (givenFile) return Promise.resolve(givenFile);
+			if (!data) return Promise.reject(new Error("PdfViewer needs data or a file."));
+			if (publicResume) return resolvePublicResumePdfBlob({ data, publicResume });
+			return includeCoverLetterHeader
+				? createResumePdfBlob(data, undefined, { includeCoverLetterHeader: true })
+				: createResumePdfBlob(data);
+		};
+
+		void createPdf()
 			.then((blob) => {
 				if (isCancelled) return;
 
@@ -100,7 +121,7 @@ export function PdfViewer({ className, data }: PdfViewerProps) {
 		return () => {
 			isCancelled = true;
 		};
-	}, [data]);
+	}, [data, givenFile, publicResume, includeCoverLetterHeader]);
 
 	useEffect(() => {
 		void fileVersion;
@@ -140,6 +161,12 @@ export function PdfViewer({ className, data }: PdfViewerProps) {
 			});
 		};
 
+		// The overlay stays until a page has actually painted, so it never lifts onto a blank viewer.
+		const reveal = () => {
+			syncViewerHeight();
+			dispatch({ type: "ready" });
+		};
+
 		const setInitialScale = () => {
 			if (!isCancelled && pdfViewer) {
 				pdfViewer.currentScaleValue = "page-width";
@@ -149,7 +176,7 @@ export function PdfViewer({ className, data }: PdfViewerProps) {
 
 		eventBus.on("pagesinit", setInitialScale);
 		eventBus.on("pagesloaded", syncViewerHeight);
-		eventBus.on("pagerendered", syncViewerHeight);
+		eventBus.on("pagerendered", reveal);
 		viewer.replaceChildren();
 		dispatch({ type: "viewerLoading" });
 		resizeObserver = new ResizeObserver(syncViewerHeight);
@@ -187,7 +214,6 @@ export function PdfViewer({ className, data }: PdfViewerProps) {
 					pdfViewer.setDocument(pdfDocument);
 					linkService.setDocument(pdfDocument);
 					syncViewerHeight();
-					dispatch({ type: "ready" });
 				}
 			}
 		};
@@ -203,7 +229,7 @@ export function PdfViewer({ className, data }: PdfViewerProps) {
 			isCancelled = true;
 			eventBus.off("pagesinit", setInitialScale);
 			eventBus.off("pagesloaded", syncViewerHeight);
-			eventBus.off("pagerendered", syncViewerHeight);
+			eventBus.off("pagerendered", reveal);
 			abortController.abort();
 			window.cancelAnimationFrame(animationFrameId);
 			resizeObserver?.disconnect();
@@ -216,7 +242,8 @@ export function PdfViewer({ className, data }: PdfViewerProps) {
 	return (
 		<div
 			ref={rootRef}
-			className={cn("pdf-viewer relative bg-neutral-100", viewerHeight ? "min-h-0" : "min-h-48", className)}
+			// Until the real height is known, reserve an A4 page so the viewer doesn't grow from 192px.
+			className={cn("pdf-viewer relative bg-sunken", viewerHeight ? "min-h-0" : "aspect-[210/297]", className)}
 			style={viewerHeight ? { height: viewerHeight } : undefined}
 		>
 			<div ref={containerRef} className="absolute inset-0 overflow-visible">
@@ -224,11 +251,17 @@ export function PdfViewer({ className, data }: PdfViewerProps) {
 			</div>
 
 			{error ? (
-				<div className="absolute inset-0 flex items-center justify-center bg-background px-6 text-center text-muted-foreground text-sm">
+				<div className="absolute inset-0 flex items-center justify-center bg-bg px-6 text-center text-sm text-ink-3">
 					Unable to display PDF preview.
 				</div>
-			) : isReady ? null : (
-				<div className="absolute inset-0 flex items-center justify-center bg-background">
+			) : (
+				<div
+					aria-hidden={isReady}
+					className={cn(
+						"absolute inset-0 flex items-center justify-center bg-bg transition-[opacity,visibility] ease-enter",
+						isReady ? "invisible opacity-0 duration-[calc(var(--d2)*0.7)]" : "duration-standard",
+					)}
+				>
 					<Spinner className="size-6" />
 				</div>
 			)}

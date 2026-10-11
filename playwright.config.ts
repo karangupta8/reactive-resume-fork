@@ -8,9 +8,9 @@ export default defineConfig({
 	testDir: "./tests/e2e/specs",
 	fullyParallel: true,
 	forbidOnly: isCI,
-	retries: isCI ? 2 : 0,
-	workers: isCI ? 2 : undefined,
-	timeout: 60_000,
+	retries: 0,
+	workers: isCI ? 1 : undefined,
+	timeout: 30_000,
 	expect: {
 		timeout: 10_000,
 	},
@@ -30,7 +30,9 @@ export default defineConfig({
 		},
 	],
 	webServer: {
-		command: "pnpm start",
+		// Run node directly: pnpm >=12.6 moves script children into their own process group,
+		// so Playwright's group kill misses the server and the job hangs after the tests finish.
+		command: "node apps/server/dist/index.mjs",
 		url: `${baseURL}/api/health`,
 		reuseExistingServer: !isCI,
 		timeout: 120_000,

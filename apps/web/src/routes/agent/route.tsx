@@ -1,17 +1,8 @@
-import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { createNoindexFollowMeta } from "@/libs/seo";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
+// The Agents pages became the assistant in the editor; their links redirect there (through 6.0.x).
 export const Route = createFileRoute("/agent")({
-	component: RouteComponent,
-	beforeLoad: async ({ context }) => {
-		if (!context.session) throw redirect({ to: "/auth/login", replace: true });
-		return { session: context.session };
+	beforeLoad: ({ context, location }) => {
+		if (!context.session) throw redirect({ to: "/auth/login", search: { callbackURL: location.href }, replace: true });
 	},
-	head: () => ({
-		meta: [createNoindexFollowMeta()],
-	}),
 });
-
-function RouteComponent() {
-	return <Outlet />;
-}

@@ -1,8 +1,7 @@
-import type { ColorResult } from "@uiw/color-convert";
-
+// Inlined instead of importing from @uiw/color-convert: its named ESM exports fail to resolve under Node 22 + pnpm.
 type Hsva = { h: number; s: number; v: number; a: number };
 
-function hsvaToRgba(hsva: Hsva): ColorResult["rgba"] {
+function hsvaToRgba(hsva: Hsva): { r: number; g: number; b: number; a: number } {
 	const h = hsva.h / 360;
 	const s = hsva.s / 100;
 	const v = hsva.v / 100;
@@ -75,19 +74,22 @@ function rgbaStringToHsva(rgba: string): Hsva {
 	return { h: h * 360, s: s * 100, v: v * 100, a };
 }
 
+type ParsedColor = { r: number; g: number; b: number; a: number };
+
 export function rgbaStringToHex(rgba: string): string {
 	const color = parseColorString(rgba);
 	if (color) return `#${toHexComponent(color.r)}${toHexComponent(color.g)}${toHexComponent(color.b)}`;
-
-	const hsva = rgbaStringToHsva(rgba);
-	return hsvaToHex(hsva);
+	// Fallback: the local parser is integer-only, so percentage-notation rgb() (e.g. "rgb(100%,0%,0%)")
+	// reaches here — @uiw converts it. Everything @uiw can't parse (named colors, hsl, transparent)
+	// yields black, same as it always has. Custom style-rule colors are arbitrary strings, so keep this.
+	return hsvaToHex(rgbaStringToHsva(rgba));
 }
 
 function toHexComponent(value: number): string {
 	return Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0");
 }
 
-export function parseColorString(value: string): ColorResult["rgba"] | null {
+export function parseColorString(value: string): ParsedColor | null {
 	const trimmed = value.trim();
 
 	// Parse rgb/rgba colors
@@ -140,4 +142,20 @@ export function isDarkColor(colorString: string): boolean {
 	// Relative luminance (ITU-R BT.601)
 	const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
 	return luminance < 128;
+}
+
+// WCAG 2 relative luminance of an sRGB channel (0–255).
+const linear = (channel: number) => {
+	const value = channel / 255;
+	return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+};
+
+/** WCAG contrast of a colour against white, with any transparency laid over white first. 1 when it can't be read. */
+export function contrastOnWhite(colorString: string): number {
+	const color = parseColorString(colorString);
+	if (!color) return 1;
+	const alpha = Math.max(0, Math.min(1, color.a));
+	const [r, g, b] = [color.r, color.g, color.b].map((channel) => linear(channel * alpha + 255 * (1 - alpha)));
+	const luminance = 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
+	return 1.05 / (luminance + 0.05);
 }

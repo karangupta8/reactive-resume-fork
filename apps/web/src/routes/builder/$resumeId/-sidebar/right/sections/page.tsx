@@ -1,21 +1,14 @@
 import type z from "zod";
-import { t } from "@lingui/core/macro";
 import { Trans } from "@lingui/react/macro";
 import { pageSchema } from "@reactive-resume/schema/resume/data";
 import { FormControl, FormItem, FormLabel, FormMessage } from "@reactive-resume/ui/components/form";
-import {
-	InputGroup,
-	InputGroupAddon,
-	InputGroupInput,
-	InputGroupText,
-} from "@reactive-resume/ui/components/input-group";
+import { InputGroup, InputGroupAddon, InputGroupText } from "@reactive-resume/ui/components/input-group";
 import { Switch } from "@reactive-resume/ui/components/switch";
-import { Combobox } from "@/components/ui/combobox";
-import { getLocaleOptions } from "@/features/locale/combobox";
-import { useResume, useUpdateResumeData } from "@/features/resume/builder/draft";
+import { SectionBase } from "../shared/section-base";
+import { NumberInput } from "@/components/input/number-input";
+import { useCurrentResume, useUpdateResumeData } from "@/features/resume/builder/draft";
 import { useSyncFormValues } from "@/hooks/use-sync-form-values";
 import { useAppForm } from "@/libs/tanstack-form";
-import { SectionBase } from "../shared/section-base";
 
 export function PageSectionBuilder() {
 	return (
@@ -29,9 +22,12 @@ const formSchema = pageSchema;
 
 type FormValues = z.infer<typeof formSchema>;
 
+const CLAMP_MIN = 0;
+const CLAMP_MAX = 100;
+
 function PageSectionForm() {
-	const resume = useResume();
-	const page = resume?.data.metadata.page;
+	const resume = useCurrentResume();
+	const page = resume.data.metadata.page;
 	const updateResumeData = useUpdateResumeData();
 
 	const persist = (data: FormValues) => {
@@ -49,286 +45,87 @@ function PageSectionForm() {
 	});
 	useSyncFormValues(form, page);
 
-	const handleAutoSave = <K extends keyof FormValues>(name: K, value: FormValues[K]) => {
-		persist({ ...form.state.values, [name]: value });
+	const handleAutoSave = () => {
+		persist(form.state.values);
 	};
+
+	const pageNumberFields = [
+		{ name: "marginX" as const, label: <Trans>Margin (Horizontal)</Trans>, min: CLAMP_MIN, max: CLAMP_MAX },
+		{ name: "marginY" as const, label: <Trans>Margin (Vertical)</Trans>, min: CLAMP_MIN, max: CLAMP_MAX },
+		{ name: "gapX" as const, label: <Trans>Spacing (Horizontal)</Trans>, min: 0, max: undefined },
+		{ name: "gapY" as const, label: <Trans>Spacing (Vertical)</Trans>, min: 0, max: undefined },
+	];
+
+	const pageSwitchFields = [
+		{ name: "hideLinkUnderline" as const, label: <Trans>Hide Link Underline</Trans> },
+		{ name: "hideIcons" as const, label: <Trans>Hide Icons</Trans> },
+		{ name: "hideSectionIcons" as const, label: <Trans>Hide Section Icons</Trans> },
+	];
 
 	return (
 		<form
-			className="grid @md:grid-cols-2 grid-cols-1 gap-4"
+			className="grid grid-cols-1 gap-4 @md:grid-cols-2"
 			onSubmit={(event) => {
 				event.preventDefault();
 				event.stopPropagation();
 				void form.handleSubmit();
 			}}
 		>
-			<form.Field name="locale">
-				{(field) => (
-					<FormItem
-						className="col-span-full"
-						hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}
-					>
-						<FormLabel>
-							<Trans>Language</Trans>
-						</FormLabel>
-						<FormControl
-							render={
-								<Combobox
-									options={getLocaleOptions()}
-									value={field.state.value}
-									onValueChange={(locale) => {
-										const value = (locale ?? "") as string;
-										field.handleChange(value);
-										handleAutoSave("locale", value);
-									}}
+			{pageNumberFields.map(({ name, label, min, max }) => (
+				<form.Field key={name} name={name}>
+					{(field) => (
+						<FormItem hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}>
+							<FormLabel>{label}</FormLabel>
+							<InputGroup>
+								<FormControl
+									render={
+										<NumberInput
+											name={field.name}
+											value={field.state.value}
+											min={min}
+											max={max}
+											step={1}
+											onBlur={field.handleBlur}
+											onValueChange={(value) => {
+												field.handleChange(value);
+												handleAutoSave();
+											}}
+										/>
+									}
 								/>
-							}
-						/>
-						<FormMessage errors={field.state.meta.errors} />
-					</FormItem>
-				)}
-			</form.Field>
+								<InputGroupAddon align="inline-end">
+									<InputGroupText>pt</InputGroupText>
+								</InputGroupAddon>
+							</InputGroup>
+							<FormMessage errors={field.state.meta.errors} />
+						</FormItem>
+					)}
+				</form.Field>
+			))}
 
-			<form.Field name="format">
-				{(field) => (
-					<FormItem
-						className="col-span-full"
-						hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}
-					>
-						<FormLabel>
-							<Trans context="Page Format (A4, Letter, Free-form)">Format</Trans>
-						</FormLabel>
-						<FormControl
-							render={
-								<Combobox
-									options={[
-										{ value: "a4", label: t`A4` },
-										{ value: "letter", label: t`Letter` },
-										{ value: "free-form", label: t`Free-form` },
-									]}
-									value={field.state.value}
-									onValueChange={(value) => {
-										const format = value as FormValues["format"];
-										field.handleChange(format);
-										handleAutoSave("format", format);
-									}}
-								/>
-							}
-						/>
-						<FormMessage errors={field.state.meta.errors} />
-					</FormItem>
-				)}
-			</form.Field>
-
-			<form.Field name="marginX">
-				{(field) => (
-					<FormItem hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}>
-						<FormLabel>
-							<Trans>Margin (Horizontal)</Trans>
-						</FormLabel>
-						<InputGroup>
+			{pageSwitchFields.map(({ name, label }) => (
+				<form.Field key={name} name={name}>
+					{(field) => (
+						<FormItem
+							className="col-span-full flex items-center gap-x-3 py-1"
+							hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}
+						>
 							<FormControl
 								render={
-									<InputGroupInput
-										name={field.name}
-										value={field.state.value}
-										min={0}
-										max={100}
-										step={1}
-										type="number"
-										onBlur={field.handleBlur}
-										onChange={(e) => {
-											const value = e.target.value;
-											const marginX = value === "" ? ("" as unknown as number) : Number(value);
-											field.handleChange(marginX);
-											handleAutoSave("marginX", marginX);
+									<Switch
+										checked={field.state.value}
+										onCheckedChange={(checked) => {
+											field.handleChange(checked);
+											handleAutoSave();
 										}}
 									/>
 								}
 							/>
-							<InputGroupAddon align="inline-end">
-								<InputGroupText>pt</InputGroupText>
-							</InputGroupAddon>
-						</InputGroup>
-						<FormMessage errors={field.state.meta.errors} />
-					</FormItem>
-				)}
-			</form.Field>
-
-			<form.Field name="marginY">
-				{(field) => (
-					<FormItem hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}>
-						<FormLabel>
-							<Trans>Margin (Vertical)</Trans>
-						</FormLabel>
-						<InputGroup>
-							<FormControl
-								render={
-									<InputGroupInput
-										name={field.name}
-										value={field.state.value}
-										min={0}
-										max={100}
-										step={1}
-										type="number"
-										onBlur={field.handleBlur}
-										onChange={(e) => {
-											const value = e.target.value;
-											const marginY = value === "" ? ("" as unknown as number) : Number(value);
-											field.handleChange(marginY);
-											handleAutoSave("marginY", marginY);
-										}}
-									/>
-								}
-							/>
-							<InputGroupAddon align="inline-end">
-								<InputGroupText>pt</InputGroupText>
-							</InputGroupAddon>
-						</InputGroup>
-						<FormMessage errors={field.state.meta.errors} />
-					</FormItem>
-				)}
-			</form.Field>
-
-			<form.Field name="gapX">
-				{(field) => (
-					<FormItem hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}>
-						<FormLabel>
-							<Trans>Spacing (Horizontal)</Trans>
-						</FormLabel>
-						<InputGroup>
-							<FormControl
-								render={
-									<InputGroupInput
-										name={field.name}
-										value={field.state.value}
-										min={0}
-										step={1}
-										type="number"
-										onBlur={field.handleBlur}
-										onChange={(e) => {
-											const value = e.target.value;
-											const gapX = value === "" ? ("" as unknown as number) : Number(value);
-											field.handleChange(gapX);
-											handleAutoSave("gapX", gapX);
-										}}
-									/>
-								}
-							/>
-							<InputGroupAddon align="inline-end">
-								<InputGroupText>pt</InputGroupText>
-							</InputGroupAddon>
-						</InputGroup>
-						<FormMessage errors={field.state.meta.errors} />
-					</FormItem>
-				)}
-			</form.Field>
-
-			<form.Field name="gapY">
-				{(field) => (
-					<FormItem hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}>
-						<FormLabel>
-							<Trans>Spacing (Vertical)</Trans>
-						</FormLabel>
-						<InputGroup>
-							<FormControl
-								render={
-									<InputGroupInput
-										name={field.name}
-										value={field.state.value}
-										min={0}
-										step={1}
-										type="number"
-										onBlur={field.handleBlur}
-										onChange={(e) => {
-											const value = e.target.value;
-											const gapY = value === "" ? ("" as unknown as number) : Number(value);
-											field.handleChange(gapY);
-											handleAutoSave("gapY", gapY);
-										}}
-									/>
-								}
-							/>
-							<InputGroupAddon align="inline-end">
-								<InputGroupText>pt</InputGroupText>
-							</InputGroupAddon>
-						</InputGroup>
-						<FormMessage errors={field.state.meta.errors} />
-					</FormItem>
-				)}
-			</form.Field>
-
-			<form.Field name="hideLinkUnderline">
-				{(field) => (
-					<FormItem
-						className="col-span-full flex items-center gap-x-3 py-1"
-						hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}
-					>
-						<FormControl
-							render={
-								<Switch
-									checked={field.state.value}
-									onCheckedChange={(checked) => {
-										field.handleChange(checked);
-										handleAutoSave("hideLinkUnderline", checked);
-									}}
-								/>
-							}
-						/>
-						<FormLabel>
-							<Trans>Hide Link Underline</Trans>
-						</FormLabel>
-					</FormItem>
-				)}
-			</form.Field>
-
-			<form.Field name="hideIcons">
-				{(field) => (
-					<FormItem
-						className="col-span-full flex items-center gap-x-3 py-1"
-						hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}
-					>
-						<FormControl
-							render={
-								<Switch
-									checked={field.state.value}
-									onCheckedChange={(checked) => {
-										field.handleChange(checked);
-										handleAutoSave("hideIcons", checked);
-									}}
-								/>
-							}
-						/>
-						<FormLabel>
-							<Trans>Hide Icons</Trans>
-						</FormLabel>
-					</FormItem>
-				)}
-			</form.Field>
-
-			<form.Field name="hideSectionIcons">
-				{(field) => (
-					<FormItem
-						className="col-span-full flex items-center gap-x-3 py-1"
-						hasError={field.state.meta.isTouched && field.state.meta.errors.length > 0}
-					>
-						<FormControl
-							render={
-								<Switch
-									checked={field.state.value}
-									onCheckedChange={(checked) => {
-										field.handleChange(checked);
-										handleAutoSave("hideSectionIcons", checked);
-									}}
-								/>
-							}
-						/>
-						<FormLabel>
-							<Trans>Hide Section Icons</Trans>
-						</FormLabel>
-					</FormItem>
-				)}
-			</form.Field>
+							<FormLabel>{label}</FormLabel>
+						</FormItem>
+					)}
+				</form.Field>
+			))}
 		</form>
 	);
 }

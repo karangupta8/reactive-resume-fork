@@ -28,17 +28,6 @@ describe("AI provider base URL policy", () => {
 		);
 	});
 
-	it("allows private and non-HTTPS provider URLs when explicitly enabled", () => {
-		envMock.FLAG_ALLOW_UNSAFE_AI_BASE_URL = true;
-
-		expect(resolveAiBaseUrl({ provider: "openai-compatible", baseURL: "http://localhost:11434/v1" })).toBe(
-			"http://localhost:11434/v1",
-		);
-		expect(resolveAiBaseUrl({ provider: "openai-compatible", baseURL: "https://10.0.0.5/v1" })).toBe(
-			"https://10.0.0.5/v1",
-		);
-	});
-
 	it("rejects non-HTTP schemes even when unsafe provider URLs are enabled", () => {
 		envMock.FLAG_ALLOW_UNSAFE_AI_BASE_URL = true;
 

@@ -1,4 +1,4 @@
-import type { Style } from "@react-pdf/types";
+import type { Style } from "../../forme/style-types";
 
 export type TemplatePlacement = "main" | "sidebar";
 
@@ -31,13 +31,9 @@ export const mergeStyles = (...styles: StyleInput[]): Style => Object.assign({},
 export const mergeLinkStyles = (options: LinkStyleOptions = {}, ...styles: StyleInput[]): Style =>
 	mergeStyles(...styles, resolveLinkDecorationStyle(options));
 
-// Increased from 1.2 to 1.3 to prevent descenders (g, p, y, etc.) from being
-// clipped by the overflow:hidden applied in safeTextStyle on all Heading elements.
-// At 1.5× heading font size, a lineHeight of 1.2 leaves insufficient room for
-// the descender depth of many fonts, causing letters to appear visually cut off.
 export const headerNameLineHeight = 1.3;
 
-export type ResolvePlacementColorOptions = {
+type ResolvePlacementColorOptions = {
 	placement: TemplatePlacement;
 	defaultForeground: string;
 	sidebarForeground?: string | undefined;

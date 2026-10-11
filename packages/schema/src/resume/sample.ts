@@ -3,6 +3,7 @@ import type { ResumeData } from "./data";
 export const sampleResumeData: ResumeData = {
 	picture: {
 		hidden: false,
+		fit: "cover",
 		url: "/photos/sample-picture.jpg",
 		size: 100,
 		rotation: 0,
@@ -43,8 +44,11 @@ export const sampleResumeData: ResumeData = {
 		icon: "article",
 		columns: 1,
 		hidden: false,
+		showHeading: true,
+		keepTogether: false,
+		startOnNewPage: false,
 		content:
-			"<p><strong>Passionate game developer with 5+ years of professional experience</strong> creating engaging gameplay systems and polished player experiences across multiple platforms. <a href='https://www.google.com'>Specialized</a> in Unity and Unreal Engine with strong expertise in C#, C++, and game design principles. Proven ability to collaborate effectively with cross-functional teams including designers, artists, and QA to deliver high-quality games on time and within scope.</p>",
+			"<p><strong>Passionate game developer with 5+ years of professional experience</strong> creating engaging gameplay systems and polished player experiences across multiple platforms. Specialized in Unity and Unreal Engine with strong expertise in C#, C++, and game design principles. Proven ability to collaborate effectively with cross-functional teams including designers, artists, and QA to deliver high-quality games on time and within scope.</p>",
 	},
 	sections: {
 		profiles: {
@@ -52,6 +56,9 @@ export const sampleResumeData: ResumeData = {
 			icon: "messenger-logo",
 			columns: 1,
 			hidden: false,
+			showHeading: true,
+			keepTogether: false,
+			startOnNewPage: false,
 			items: [
 				{
 					id: "019bef5a-93e4-7746-ad39-3d42ddc9b4d8",
@@ -86,6 +93,9 @@ export const sampleResumeData: ResumeData = {
 			icon: "briefcase",
 			columns: 1,
 			hidden: false,
+			showHeading: true,
+			keepTogether: false,
+			startOnNewPage: false,
 			items: [
 				{
 					id: "019bef5a-93e4-7746-ad39-44d8cec98ca4",
@@ -101,7 +111,7 @@ export const sampleResumeData: ResumeData = {
 					},
 					roles: [],
 					description:
-						"<ul><li><p>Lead gameplay programmer on an unannounced AAA action-adventure title built in Unreal Engine 5 for PC and next-gen consoles</p></li><li><p>Architected and implemented core combat system including hit detection, combo mechanics, and enemy AI behavior trees serving 15+ enemy types</p></li><li><p>Developed custom editor tools in C++ that reduced level designer iteration time by 40% and improved workflow efficiency across the team</p></li><li><p>Optimized rendering pipeline and gameplay systems to maintain 60 FPS performance target on all supported platforms, achieving 95% frame rate stability</p></li><li><p>Ad nostrud enim adipisicing ea proident aliqua veniam nisi amet ea irure et mollit.</p></li></ul><p></p>",
+						"<ul><li><p>Lead gameplay programmer on an unannounced AAA action-adventure title built in Unreal Engine 5 for PC and next-gen consoles</p></li><li><p>Architected and implemented core combat system including hit detection, combo mechanics, and enemy AI behavior trees serving 15+ enemy types</p></li><li><p>Developed custom editor tools in C++ that reduced level designer iteration time by 40% and improved workflow efficiency across the team</p></li><li><p>Optimized rendering pipeline and gameplay systems to maintain 60 FPS performance target on all supported platforms, achieving 95% frame rate stability</p></li><li><p>Collaborated with designers and QA to resolve gameplay defects and ship stable milestone builds.</p></li></ul><p></p>",
 				},
 			],
 		},
@@ -110,6 +120,9 @@ export const sampleResumeData: ResumeData = {
 			icon: "graduation-cap",
 			columns: 1,
 			hidden: false,
+			showHeading: true,
+			keepTogether: false,
+			startOnNewPage: false,
 			items: [
 				{
 					id: "019bef5a-93e4-7746-ad39-48455f6cef9e",
@@ -135,6 +148,9 @@ export const sampleResumeData: ResumeData = {
 			icon: "code-simple",
 			columns: 1,
 			hidden: false,
+			showHeading: true,
+			keepTogether: false,
+			startOnNewPage: false,
 			items: [
 				{
 					id: "019bef5a-93e4-7746-ad39-4d2603fe2801",
@@ -181,7 +197,12 @@ export const sampleResumeData: ResumeData = {
 			title: "",
 			icon: "compass-tool",
 			columns: 1,
+			layout: "default",
+			keywordLayout: "inline",
 			hidden: false,
+			showHeading: true,
+			keepTogether: false,
+			startOnNewPage: false,
 			items: [
 				{
 					id: "019bef5a-93e4-7746-ad39-5a52dcf50ed4",
@@ -250,6 +271,9 @@ export const sampleResumeData: ResumeData = {
 			icon: "translate",
 			columns: 1,
 			hidden: false,
+			showHeading: true,
+			keepTogether: false,
+			startOnNewPage: false,
 			items: [
 				{
 					id: "019bef5a-93e4-7746-ad39-73807ccc48b5",
@@ -272,6 +296,9 @@ export const sampleResumeData: ResumeData = {
 			icon: "football",
 			columns: 1,
 			hidden: false,
+			showHeading: true,
+			keepTogether: false,
+			startOnNewPage: false,
 			items: [
 				{
 					id: "019bef5a-93e4-7746-ad39-7821b4de95f7",
@@ -312,6 +339,9 @@ export const sampleResumeData: ResumeData = {
 			icon: "trophy",
 			columns: 1,
 			hidden: false,
+			showHeading: true,
+			keepTogether: false,
+			startOnNewPage: false,
 			items: [
 				{
 					id: "019bef5a-93e4-7746-ad39-8a8bb9fbe182",
@@ -348,6 +378,9 @@ export const sampleResumeData: ResumeData = {
 			icon: "certificate",
 			columns: 1,
 			hidden: false,
+			showHeading: true,
+			keepTogether: false,
+			startOnNewPage: false,
 			items: [
 				{
 					id: "019bef5a-93e4-7746-ad39-91fe8a4dfea6",
@@ -382,6 +415,9 @@ export const sampleResumeData: ResumeData = {
 			icon: "books",
 			columns: 1,
 			hidden: false,
+			showHeading: true,
+			keepTogether: false,
+			startOnNewPage: false,
 			items: [
 				{
 					id: "019bef5a-93e4-7746-ad39-9816f0081895",
@@ -418,6 +454,9 @@ export const sampleResumeData: ResumeData = {
 			icon: "hand-heart",
 			columns: 2,
 			hidden: false,
+			showHeading: true,
+			keepTogether: false,
+			startOnNewPage: false,
 			items: [
 				{
 					id: "019bef5a-93e4-7746-ad39-a02580473e05",
@@ -454,6 +493,9 @@ export const sampleResumeData: ResumeData = {
 			icon: "phone",
 			columns: 1,
 			hidden: false,
+			showHeading: true,
+			keepTogether: false,
+			startOnNewPage: false,
 			items: [
 				{
 					id: "019bef5a-93e4-7746-ad39-a945c0f42dd5",
@@ -473,10 +515,13 @@ export const sampleResumeData: ResumeData = {
 	},
 	customSections: [
 		{
-			title: "",
+			title: "Earlier experience",
 			icon: "briefcase",
 			columns: 1,
 			hidden: false,
+			showHeading: true,
+			keepTogether: false,
+			startOnNewPage: false,
 			id: "019becaf-0b87-769d-98a6-46ccf558c0e8",
 			type: "experience",
 			items: [
@@ -514,24 +559,6 @@ export const sampleResumeData: ResumeData = {
 				},
 			],
 		},
-		{
-			title: "Cover Letter",
-			icon: "envelope-simple",
-			columns: 1,
-			hidden: false,
-			id: "019bef5b-0b3d-7e2a-8a7c-12d9e23a4f6b",
-			type: "cover-letter",
-			items: [
-				{
-					id: "019bef5b-0f8d-77d1-9b2a-4a1b65e1b8aa",
-					hidden: false,
-					recipient:
-						'<p>Hiring Manager<br />Sunrise Games Studio<br />Seattle, WA<br /><a href="mailto:hiring@sunrisegames.com">hiring@sunrisegames.com</a></p>',
-					content:
-						"<p>Dear Hiring Manager,</p><p>I'm excited to apply for the Senior Gameplay Engineer role at Sunrise Games Studio. Over the past five years, I have shipped cross-platform titles in Unity and Unreal Engine, leading core gameplay and tooling efforts that improved iteration speed and player experience. At Cascade Studios, I architected combat systems and optimized performance to maintain 60 FPS on console while partnering closely with design and art.</p><p>I thrive in collaborative, cross-disciplinary teams and enjoy mentoring junior engineers. I'd welcome the chance to bring my gameplay systems expertise and tooling focus to your next title.</p><p>Sincerely,<br />David Kowalski</p>",
-				},
-			],
-		},
 	],
 	metadata: {
 		template: "azurill",
@@ -553,11 +580,6 @@ export const sampleResumeData: ResumeData = {
 					main: ["projects", "publications", "volunteer"],
 					sidebar: [],
 				},
-				{
-					fullWidth: true,
-					main: ["019bef5b-0b3d-7e2a-8a7c-12d9e23a4f6b"],
-					sidebar: [],
-				},
 			],
 		},
 		page: {
@@ -577,7 +599,7 @@ export const sampleResumeData: ResumeData = {
 				type: "icon",
 			},
 			colors: {
-				primary: "rgba(0, 132, 209, 1)",
+				primary: "rgba(0, 112, 178, 1)",
 				text: "rgba(0, 0, 0, 1)",
 				background: "rgba(255, 255, 255, 1)",
 			},
@@ -599,4 +621,16 @@ export const sampleResumeData: ResumeData = {
 		notes: "",
 		styleRules: [],
 	},
+};
+
+/**
+ * Returns the sample resume, optionally overriding `basics.name` so the seeded
+ * content reflects the name the user entered when creating the resume. When no
+ * name is given, the default sample persona is returned unchanged.
+ */
+export const createSampleResumeData = (name?: string): ResumeData => {
+	const trimmed = name?.trim();
+	if (!trimmed) return sampleResumeData;
+
+	return { ...sampleResumeData, basics: { ...sampleResumeData.basics, name: trimmed } };
 };

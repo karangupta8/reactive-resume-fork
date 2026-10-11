@@ -1,12 +1,10 @@
 {
 	"$schema": "https://unpkg.com/knip@6/schema.json",
 	"tags": ["-lintignore"],
+	"ignoreBinaries": ["pdftotext"],
 	"workspaces": {
-		".": {
-			"ignoreFiles": [".ncurc.cjs"]
-		},
 		"apps/web": {
-			"entry": ["lingui.config.ts", "vite.config.ts", "vitest.config.ts"],
+			"entry": ["lingui.config.ts", "vite.config.ts", "vitest.config.ts", "src/features/homepage/prerender.tsx"],
 			"vite": {
 				"config": []
 			},
@@ -15,46 +13,66 @@
 			}
 		},
 		"apps/server": {
+			"entry": ["vercel.mjs", "src/cloudflare/index.ts", "src/cloudflare/sharp.ts"],
 			"ignoreDependencies": [
 				"@ai-sdk/anthropic",
+				"@ai-sdk/cerebras",
+				"@ai-sdk/cohere",
+				"@ai-sdk/deepseek",
+				"@ai-sdk/fireworks",
 				"@ai-sdk/google",
+				"@ai-sdk/groq",
+				"@ai-sdk/mistral",
 				"@ai-sdk/openai",
 				"@ai-sdk/openai-compatible",
+				"@ai-sdk/perplexity",
+				"@ai-sdk/togetherai",
+				"@ai-sdk/xai",
 				"@aws-sdk/client-s3",
 				"@better-auth/api-key",
 				"@better-auth/drizzle-adapter",
 				"@better-auth/infra",
 				"@better-auth/passkey",
+				"@bramus/specificity",
+				"@formepdf/react",
 				"@orpc/experimental-ratelimit",
 				"@sindresorhus/slugify",
 				"@t3-oss/env-core",
 				"@uiw/color-convert",
+				"@vercel/blob",
 				"ai",
-				"bcrypt",
+				"bcryptjs",
 				"cjk-regex",
-				"deepmerge-ts",
-				"dompurify",
-				"dotenv",
+				"css-tree",
+				"docx",
 				"drizzle-zod",
-				"es-toolkit",
 				"fast-json-patch",
+				"fast-png",
+				"fflate",
+				"ioredis",
+				"jose",
 				"jsonrepair",
 				"node-html-parser",
 				"nodemailer",
 				"ollama-ai-provider-v2",
-				"phosphor-icons-react-pdf",
+				"pdfjs-dist",
 				"react-email",
-				"react-pdf-html",
+				"react-reconciler",
 				"resumable-stream",
+				"sanitize-html",
 				"sharp",
+				"tokenx",
 				"ts-pattern",
 				"unique-names-generator",
 				"uuid"
 			]
 		},
+		"tooling": {
+			"entry": ["**/*.mjs", "mcp/seed.ts"],
+			"ignoreDependencies": ["@formepdf/core", "@orpc/client", "css-tree"]
+		},
 		"packages/api": {
 			"ignoreDependencies": ["ioredis"]
 		}
-	},
-	"ignoreDependencies": ["@reactive-resume/config", "npm-check-updates"]
+	}
 }

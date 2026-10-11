@@ -13,18 +13,36 @@ export const sharingRouter = {
 			operationId: "getResumeBySlug",
 			summary: "Get public resume by username and slug",
 			description:
-				"Returns a publicly shared resume identified by the owner's username and the resume's slug. If the resume is password-protected and the viewer has not yet verified the password, a 401 error with code NEED_PASSWORD is returned. No authentication required for public resumes; if authenticated as the owner, private resumes are also accessible.",
+				"Returns a publicly shared resume identified by the owner's username and the resume's slug. A slug the resume had within the last 30 days still finds it; the response carries the current slug, so clients can redirect. If the resume is password-protected and the viewer has not yet verified the password, a 401 error with code NEED_PASSWORD is returned. No authentication required for public resumes; if authenticated as the owner, private resumes are also accessible.",
 			successDescription: "The public resume with its full data.",
 		})
 		.input(resumeDto.getBySlug.input)
 		.output(resumeDto.getBySlug.output)
-		.handler(async ({ input, context }) => {
-			return resumeService.getBySlug({
+		.handler(({ input, context }) =>
+			resumeService.getBySlug({
 				...input,
 				requestHeaders: context.reqHeaders,
-				...(context.user?.id ? { currentUserId: context.user.id } : {}),
-			});
-		}),
+				...(context.trustedClient ? { trustedClient: context.trustedClient } : {}),
+				...(context.user?.id && context.authentication?.permissions.includes("read")
+					? { currentUserId: context.user.id }
+					: {}),
+			}),
+		),
+
+	checkSlug: protectedProcedure
+		.route({
+			method: "GET",
+			path: "/resumes/{resumeId}/slug-check",
+			tags: ["Resume Sharing"],
+			operationId: "checkResumeSlug",
+			summary: "Check a resume address",
+			description:
+				"Checks whether a slug can be a resume's public address: lowercase letters and numbers in groups joined by single dashes, and not used by another of the user's resumes. When it can't, suggests one that works. Requires authentication.",
+			successDescription: "Whether the slug is available, and a suggestion when it isn't.",
+		})
+		.input(resumeDto.checkSlug.input)
+		.output(resumeDto.checkSlug.output)
+		.handler(({ input, context }) => resumeService.checkSlug({ ...input, userId: context.user.id })),
 
 	setPassword: protectedProcedure
 		.route({
@@ -40,13 +58,13 @@ export const sharingRouter = {
 		.input(resumeDto.setPassword.input)
 		.use(resumeMutationRateLimit)
 		.output(resumeDto.setPassword.output)
-		.handler(async ({ context, input }) => {
-			return resumeService.setPassword({
+		.handler(({ context, input }) =>
+			resumeService.setPassword({
 				id: input.id,
 				userId: context.user.id,
 				password: input.password,
-			});
-		}),
+			}),
+		),
 
 	verifyPassword: publicProcedure
 		.route({
@@ -63,19 +81,19 @@ export const sharingRouter = {
 			z.object({
 				username: z.string().min(1).describe("The username of the resume owner."),
 				slug: z.string().min(1).describe("The slug of the resume."),
-				password: z.string().min(1).describe("The password to verify."),
+				password: z.string().min(1).max(64).describe("The password to verify."),
 			}),
 		)
 		.use(resumePasswordRateLimit)
 		.output(z.boolean())
-		.handler(async ({ context, input }): Promise<boolean> => {
-			return resumeService.verifyPassword({
+		.handler(({ context, input }): Promise<boolean> =>
+			resumeService.verifyPassword({
 				username: input.username,
 				slug: input.slug,
 				password: input.password,
 				...(context.resHeaders ? { responseHeaders: context.resHeaders } : {}),
-			});
-		}),
+			}),
+		),
 
 	removePassword: protectedProcedure
 		.route({
@@ -91,10 +109,10 @@ export const sharingRouter = {
 		.input(resumeDto.removePassword.input)
 		.use(resumeMutationRateLimit)
 		.output(resumeDto.removePassword.output)
-		.handler(async ({ context, input }) => {
-			return resumeService.removePassword({
+		.handler(({ context, input }) =>
+			resumeService.removePassword({
 				id: input.id,
 				userId: context.user.id,
-			});
-		}),
+			}),
+		),
 };

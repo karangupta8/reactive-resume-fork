@@ -1,4 +1,4 @@
-import { auth, verifyOAuthToken } from "@reactive-resume/auth/config";
+import { resolveAuthenticationFromRequestHeaders } from "@reactive-resume/api/context";
 
 export class AuthError extends Error {
 	constructor() {
@@ -6,28 +6,11 @@ export class AuthError extends Error {
 	}
 }
 
-export async function authenticateRequest(request: Request): Promise<void> {
-	const authHeader = request.headers.get("authorization");
-
-	if (authHeader?.startsWith("Bearer ")) {
-		try {
-			const payload = await verifyOAuthToken(authHeader.slice(7));
-			if (payload?.sub) return;
-		} catch {
-			// Invalid or expired token; fall through to API key auth.
-		}
-	}
-
-	const apiKey = request.headers.get("x-api-key");
-
-	if (apiKey) {
-		try {
-			const result = await auth.api.verifyApiKey({ body: { key: apiKey } });
-			if (result.valid) return;
-		} catch {
-			// Invalid or malformed key; fall through to AuthError.
-		}
-	}
-
+export async function authenticateRequest(request: Request) {
+	// MCP accepts API keys and bearer tokens; share their priority and validation with its oRPC tools.
+	const headers = new Headers(request.headers);
+	headers.delete("cookie");
+	const authentication = await resolveAuthenticationFromRequestHeaders(headers);
+	if (authentication) return authentication;
 	throw new AuthError();
 }

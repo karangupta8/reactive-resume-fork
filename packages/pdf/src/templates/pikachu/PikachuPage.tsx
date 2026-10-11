@@ -1,20 +1,34 @@
-import type { Style } from "@react-pdf/types";
 import type { TemplatePageProps } from "../../document";
+import type { Style } from "../../forme/style-types";
 import type { TemplateColorRoles, TemplateFeatures, TemplateStyleContext, TemplateStyleSlots } from "../shared/types";
 import { useMemo } from "react";
-import { rgbaStringToHex } from "@reactive-resume/utils/color";
+import { Page, StyleSheet, View } from "#react-pdf-renderer";
 import { useRender } from "../../context";
-import { Image, Page, StyleSheet, View } from "../../renderer";
-import { CustomFieldContactItem, WebsiteContactItem } from "../shared/contact-item";
+import { useRenderedSectionIds, useResolvedNode } from "../../semantic/context";
+import { semanticNodeKeys } from "../../semantic/node-keys";
+import {
+	CustomFieldContactItem,
+	EmailContactItem,
+	LocationContactItem,
+	PhoneContactItem,
+	WebsiteContactItem,
+} from "../shared/contact-item";
 import { TemplateProvider } from "../shared/context";
 import { filterSections } from "../shared/filtering";
 import { getTemplateMetrics } from "../shared/metrics";
-import { getTemplatePageMinHeightStyle, getTemplatePageSize } from "../shared/page-size";
 import { hasTemplatePicture } from "../shared/picture";
-import { Heading, Icon, Link, Text } from "../shared/primitives";
-import { createRtlStyleHelpers } from "../shared/rtl";
+import {
+	Heading,
+	SemanticContactListView,
+	SemanticHeaderPicture,
+	SemanticHeaderView,
+	SemanticRegionView,
+	SemanticTemplatePartView,
+	Text,
+} from "../shared/primitives";
 import { Section } from "../shared/sections";
 import { composeStyles, headerNameLineHeight, resolvePlacementColor } from "../shared/styles";
+import { createIconSlot, useTemplateBase } from "../shared/template-base";
 
 type PikachuStyles = Omit<TemplateStyleSlots, "page"> & {
 	page: Style;
@@ -47,22 +61,25 @@ const pikachuFeatures = {
 	stackSidebarItemHeader: true,
 } satisfies TemplateFeatures;
 
-export const PikachuPage = ({ page, pageIndex }: TemplatePageProps) => {
+export const PikachuPage = ({ page, pageSize, pageMinHeightStyle, showHeader, pageNumber }: TemplatePageProps) => {
 	const data = useRender();
+	const pageNodeKey = semanticNodeKeys.page(pageNumber);
+	const { style: semanticPageStyle, size: semanticPageSize, ...semanticPageProps } = useResolvedNode(pageNodeKey);
 	const { metadata, picture } = data;
 	const { colors, styles } = usePikachuTemplate();
 	const metrics = getTemplateMetrics(metadata.page);
-	const pageSize = getTemplatePageSize(metadata.page.format);
-	const pageMinHeightStyle = getTemplatePageMinHeightStyle(metadata.page.format);
-	const showHeader = pageIndex === 0;
 	const showSidebar = !page.fullWidth;
 	const hasPicture = hasTemplatePicture(picture);
-	const mainSections = filterSections(page.main, data);
-	const sidebarSections = filterSections(page.sidebar, data);
+	const mainSections = useRenderedSectionIds(pageNodeKey, filterSections(page.main, data));
+	const sidebarSections = useRenderedSectionIds(pageNodeKey, filterSections(page.sidebar, data));
 
 	return (
-		<Page size={pageSize} style={composeStyles(styles.page, pageMinHeightStyle)}>
-			<TemplateProvider styles={styles} colors={colors} features={pikachuFeatures}>
+		<Page
+			{...semanticPageProps}
+			size={semanticPageSize ?? pageSize}
+			style={composeStyles(styles.page, pageMinHeightStyle, semanticPageStyle)}
+		>
+			<TemplateProvider pageNodeKey={pageNodeKey} styles={styles} colors={colors} features={pikachuFeatures}>
 				<View style={styles.layout}>
 					{showSidebar && (
 						<View
@@ -71,20 +88,27 @@ export const PikachuPage = ({ page, pageIndex }: TemplatePageProps) => {
 								rowGap: metrics.sectionGap,
 							})}
 						>
-							{showHeader && showSidebar && hasPicture && <Image src={picture.url} style={styles.picture} />}
+							{showHeader && showSidebar && hasPicture && (
+								<SemanticHeaderPicture src={picture.url} style={styles.picture} />
+							)}
 
-							<View style={composeStyles(styles.sidebarContent, { rowGap: metrics.sectionGap })}>
+							<SemanticRegionView
+								region="sidebar"
+								style={composeStyles(styles.sidebarContent, { rowGap: metrics.sectionGap })}
+							>
 								{sidebarSections.map((section) => (
 									<Section key={section} section={section} placement="sidebar" />
 								))}
-							</View>
+							</SemanticRegionView>
 						</View>
 					)}
 
-					<View style={composeStyles(styles.mainColumn, { rowGap: metrics.sectionGap })}>
+					<SemanticRegionView region="main" style={composeStyles(styles.mainColumn, { rowGap: metrics.sectionGap })}>
 						{showHeader && (
 							<View style={styles.headerRow}>
-								{showHeader && !showSidebar && hasPicture && <Image src={picture.url} style={styles.picture} />}
+								{showHeader && !showSidebar && hasPicture && (
+									<SemanticHeaderPicture src={picture.url} style={styles.picture} />
+								)}
 								<Header styles={styles} colors={colors} />
 							</View>
 						)}
@@ -94,7 +118,7 @@ export const PikachuPage = ({ page, pageIndex }: TemplatePageProps) => {
 								<Section key={section} section={section} placement="main" />
 							))}
 						</View>
-					</View>
+					</SemanticRegionView>
 				</View>
 			</TemplateProvider>
 		</Page>
@@ -105,33 +129,33 @@ const Header = ({ styles, colors }: PikachuHeaderProps) => {
 	const { basics } = useRender();
 
 	return (
-		<View style={styles.header}>
-			<View style={styles.headerDivider}>
+		<SemanticHeaderView style={styles.header}>
+			<SemanticTemplatePartView partKeys={["header-divider"]} style={styles.headerDivider}>
 				<View style={styles.headerIdentity}>
 					<Heading style={styles.headerName}>{basics.name}</Heading>
 					<Text style={styles.headerText}>{basics.headline}</Text>
 				</View>
-			</View>
+			</SemanticTemplatePartView>
 
-			<View style={styles.contactList}>
-				{basics.email && (
-					<Link src={`mailto:${basics.email}`} style={styles.contactItem}>
-						<Icon name="envelope" color={colors.background} />
-						<Text style={styles.headerText}>{basics.email}</Text>
-					</Link>
-				)}
-				{basics.phone && (
-					<Link src={`tel:${basics.phone}`} style={styles.contactItem}>
-						<Icon name="phone" color={colors.background} />
-						<Text style={styles.headerText}>{basics.phone}</Text>
-					</Link>
-				)}
-				{basics.location && (
-					<View style={styles.contactItem}>
-						<Icon name="map-pin" color={colors.background} />
-						<Text style={styles.headerText}>{basics.location}</Text>
-					</View>
-				)}
+			<SemanticContactListView style={styles.contactList}>
+				<EmailContactItem
+					email={basics.email}
+					style={styles.contactItem}
+					textStyle={styles.headerText}
+					iconColor={colors.background}
+				/>
+				<PhoneContactItem
+					phone={basics.phone}
+					style={styles.contactItem}
+					textStyle={styles.headerText}
+					iconColor={colors.background}
+				/>
+				<LocationContactItem
+					location={basics.location}
+					style={styles.contactItem}
+					textStyle={styles.headerText}
+					iconColor={colors.background}
+				/>
 				<WebsiteContactItem
 					website={basics.website}
 					style={styles.contactItem}
@@ -147,97 +171,23 @@ const Header = ({ styles, colors }: PikachuHeaderProps) => {
 						iconColor={colors.background}
 					/>
 				))}
-			</View>
-		</View>
+			</SemanticContactListView>
+		</SemanticHeaderView>
 	);
 };
 
 const usePikachuTemplate = (): PikachuTemplate => {
-	const { picture, metadata, rtl } = useRender();
+	const { picture, metadata, r, foreground, background, primary, metrics, base } = useTemplateBase();
 
 	return useMemo(() => {
-		const r = createRtlStyleHelpers(rtl);
-		const foreground = rgbaStringToHex(metadata.design.colors.text);
-		const background = rgbaStringToHex(metadata.design.colors.background);
-		const primary = rgbaStringToHex(metadata.design.colors.primary);
 		const colors: TemplateColorRoles = { foreground, background, primary };
-		const metrics = getTemplateMetrics(metadata.page);
-
-		const bodyText = {
-			fontFamily: metadata.typography.body.fontFamily,
-			fontSize: metadata.typography.body.fontSize,
-			fontWeight: metadata.typography.body.fontWeights[0] ?? "400",
-			lineHeight: metadata.typography.body.lineHeight,
-			color: foreground,
-			...r.text,
-		} satisfies Style;
 
 		const baseStyles = StyleSheet.create({
+			...base,
 			page: {
-				color: foreground,
-				backgroundColor: background,
+				...base.page,
 				paddingHorizontal: metrics.page.paddingHorizontal,
 				paddingVertical: metrics.page.paddingVertical,
-				fontFamily: metadata.typography.body.fontFamily,
-				fontSize: metadata.typography.body.fontSize,
-				lineHeight: metadata.typography.body.lineHeight,
-				direction: r.pageDirection,
-			},
-			text: bodyText,
-			heading: {
-				fontFamily: metadata.typography.heading.fontFamily,
-				fontSize: metadata.typography.heading.fontSize,
-				fontWeight: metadata.typography.heading.fontWeights.at(-1) ?? "600",
-				lineHeight: metadata.typography.heading.lineHeight,
-				color: foreground,
-				...r.text,
-			},
-			div: {
-				rowGap: metrics.gapY(0.125),
-				columnGap: metrics.gapX(1 / 3),
-			},
-			inline: {
-				flexDirection: r.row,
-				alignItems: "center",
-				columnGap: metrics.gapX(1 / 3),
-			},
-			link: {
-				textDecoration: "none",
-				color: foreground,
-			},
-			small: {
-				fontSize: metadata.typography.body.fontSize * 0.875,
-			},
-			bold: {
-				fontWeight: metadata.typography.body.fontWeights.at(-1) ?? "600",
-			},
-			richParagraph: {
-				margin: 0,
-				...bodyText,
-			},
-			richListItemRow: {
-				flexDirection: "row",
-				columnGap: metrics.gapX(1 / 3),
-				alignItems: "flex-start",
-			},
-			richListItemMarker: {
-				...bodyText,
-				width: metadata.typography.body.fontSize,
-				textAlign: r.listMarkerTextAlign,
-			},
-			richListItemContent: {
-				...bodyText,
-				flex: 1,
-			},
-			splitRow: {
-				flexDirection: r.row,
-				flexWrap: "wrap",
-				alignItems: "flex-start",
-				justifyContent: "space-between",
-				columnGap: metrics.gapX(2 / 3),
-			},
-			alignEnd: {
-				...r.alignEnd,
 			},
 			section: {
 				flexDirection: "column",
@@ -260,7 +210,7 @@ const usePikachuTemplate = (): PikachuTemplate => {
 				backgroundColor: primary,
 			},
 			layout: {
-				flexDirection: r.row,
+				flexDirection: r.columns,
 				columnGap: metrics.columnGap,
 			},
 			sidebarColumn: {
@@ -315,18 +265,6 @@ const usePikachuTemplate = (): PikachuTemplate => {
 				alignItems: "center",
 				columnGap: metrics.gapX(1 / 6),
 			},
-			picture: {
-				width: picture.size,
-				height: picture.size,
-				objectFit: "cover",
-				aspectRatio: picture.aspectRatio,
-				borderRadius: picture.borderRadius,
-				borderColor: rgbaStringToHex(picture.borderColor),
-				borderWidth: picture.borderWidth,
-				shadowColor: rgbaStringToHex(picture.shadowColor),
-				shadowWidth: picture.shadowWidth,
-				transform: `rotate(${picture.rotation}deg)`,
-			},
 		});
 
 		const accentFor = ({ colors }: TemplateStyleContext) => colors.primary;
@@ -341,18 +279,14 @@ const usePikachuTemplate = (): PikachuTemplate => {
 			colors,
 			styles: {
 				...baseStyles,
-				text: (context) => ({ ...bodyText, color: foregroundFor(context) }),
+				text: (context) => ({ ...base.text, color: foregroundFor(context) }),
 				heading: (context) => ({ ...baseStyles.heading, color: foregroundFor(context) }),
 				link: (context) => ({ ...baseStyles.link, color: foregroundFor(context) }),
 				sectionHeading: (context) => ({ ...baseStyles.sectionHeading, color: accentFor(context) }),
 				levelItem: (context) => ({ borderColor: accentFor(context) }),
 				levelItemActive: (context) => ({ backgroundColor: accentFor(context) }),
-				icon: (context) => ({
-					display: metadata.page.hideIcons ? "none" : "flex",
-					size: metadata.typography.body.fontSize,
-					color: accentFor(context),
-				}),
+				icon: createIconSlot({ metadata, accentFor }),
 			} satisfies PikachuStyles,
 		};
-	}, [picture, metadata, rtl]);
+	}, [picture, metadata, r, primary, metrics, foreground, base, background]);
 };

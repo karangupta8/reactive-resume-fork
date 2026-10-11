@@ -1,128 +1,28 @@
-import { useInView, useMotionValue, useSpring } from "motion/react";
-import { useCallback, useEffect, useEffectEvent, useRef } from "react";
+import { m, useInView, useReducedMotion, useSpring, useTransform } from "motion/react";
+import { useEffect, useRef } from "react";
 
 type CountUpProps = {
 	to: number;
-	from?: number;
-	direction?: "up" | "down";
-	delay?: number;
-	duration?: number;
 	className?: string;
-	startWhen?: boolean;
-	separator?: string;
-	onStart?: () => void;
-	onEnd?: () => void;
 	"aria-hidden"?: boolean | "true" | "false";
-	"aria-live"?: "off" | "polite" | "assertive";
-	"aria-atomic"?: boolean | "true" | "false";
 };
 
-export function CountUp({
-	to,
-	from = 0,
-	direction = "up",
-	delay = 0,
-	duration = 2,
-	className = "",
-	startWhen = true,
-	separator = "",
-	onStart,
-	onEnd,
-	"aria-hidden": ariaHidden,
-	"aria-live": ariaLive = "polite",
-	"aria-atomic": ariaAtomic = "true",
-}: CountUpProps) {
+// Integer count-up with en-US grouping. Starts once when scrolled into view; reduced motion shows the final value.
+export function CountUp({ to, className, "aria-hidden": ariaHidden }: CountUpProps) {
 	const ref = useRef<HTMLSpanElement>(null);
-	const motionValue = useMotionValue(direction === "down" ? to : from);
-
-	const damping = 20 + 40 * (1 / duration);
-	const stiffness = 100 * (1 / duration);
-
-	const springValue = useSpring(motionValue, {
-		damping,
-		stiffness,
-	});
-
-	const isInView = useInView(ref, { once: true, margin: "0px" });
-
-	const getDecimalPlaces = (num: number): number => {
-		const str = num.toString();
-
-		if (str.includes(".")) {
-			const decimals = str.split(".")[1];
-			if (Number.parseInt(decimals, 10) !== 0) return decimals.length;
-		}
-
-		return 0;
-	};
-
-	const maxDecimals = Math.max(getDecimalPlaces(from), getDecimalPlaces(to));
-
-	const formatValue = useCallback(
-		(latest: number) => {
-			const hasDecimals = maxDecimals > 0;
-
-			const options: Intl.NumberFormatOptions = {
-				useGrouping: !!separator,
-				minimumFractionDigits: hasDecimals ? maxDecimals : 0,
-				maximumFractionDigits: hasDecimals ? maxDecimals : 0,
-			};
-
-			const formattedNumber = Intl.NumberFormat("en-US", options).format(latest);
-
-			return separator ? formattedNumber.replace(/,/g, separator) : formattedNumber;
-		},
-		[maxDecimals, separator],
-	);
-
-	const formatCurrentValue = useEffectEvent((latest: number) => formatValue(latest));
-	const notifyStart = useEffectEvent(() => onStart?.());
-	const notifyEnd = useEffectEvent(() => onEnd?.());
+	const isInView = useInView(ref, { once: true });
+	const reducedMotion = useReducedMotion();
+	const spring = useSpring(0, { visualDuration: 0.8, bounce: 0 });
+	const text = useTransform(spring, (value) => Math.round(value).toLocaleString("en-US"));
 
 	useEffect(() => {
-		if (ref.current) {
-			ref.current.textContent = formatCurrentValue(direction === "down" ? to : from);
-		}
-	}, [from, to, direction]);
-
-	useEffect(() => {
-		if (isInView && startWhen) {
-			notifyStart();
-			const timeoutId = setTimeout(() => {
-				motionValue.set(direction === "down" ? from : to);
-			}, delay * 1000);
-
-			const durationTimeoutId = setTimeout(
-				() => {
-					notifyEnd();
-				},
-				delay * 1000 + duration * 1000,
-			);
-
-			return () => {
-				clearTimeout(timeoutId);
-				clearTimeout(durationTimeoutId);
-			};
-		}
-	}, [isInView, startWhen, motionValue, direction, from, to, delay, duration]);
-
-	useEffect(() => {
-		const unsubscribe = springValue.on("change", (latest: number) => {
-			if (ref.current) {
-				ref.current.textContent = formatCurrentValue(latest);
-			}
-		});
-
-		return () => unsubscribe();
-	}, [springValue]);
+		if (reducedMotion) spring.jump(to);
+		else if (isInView) spring.set(to);
+	}, [isInView, reducedMotion, spring, to]);
 
 	return (
-		<span
-			ref={ref}
-			className={className}
-			aria-hidden={ariaHidden}
-			aria-live={ariaHidden ? undefined : ariaLive}
-			aria-atomic={ariaHidden ? undefined : ariaAtomic}
-		/>
+		<m.span ref={ref} className={className} aria-hidden={ariaHidden}>
+			{text}
+		</m.span>
 	);
 }

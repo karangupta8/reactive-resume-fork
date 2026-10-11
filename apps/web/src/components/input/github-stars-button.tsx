@@ -2,8 +2,8 @@ import { t } from "@lingui/core/macro";
 import { GithubLogoIcon, StarIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@reactive-resume/ui/components/button";
-import { orpc } from "@/libs/orpc/client";
 import { CountUp } from "../animation/count-up";
+import { orpc } from "@/libs/orpc/client";
 
 export function GithubStarsButton() {
 	const { data: starCount } = useQuery(orpc.statistics.github.getStarCount.queryOptions());
@@ -15,19 +15,17 @@ export function GithubStarsButton() {
 
 	return (
 		<Button
-			variant="outline"
+			variant="secondary"
 			nativeButton={false}
 			render={
 				<a
 					target="_blank"
-					href="https://github.com/amruthpillai/reactive-resume"
+					href="https://github.com/reactive-resume/reactive-resume"
 					aria-label={ariaLabel}
 					rel="noopener noreferrer"
 				>
 					<GithubLogoIcon aria-hidden="true" />
-					{starCount != null ? (
-						<CountUp to={starCount} duration={0.5} separator="," className="font-bold" aria-hidden="true" />
-					) : null}
+					{starCount != null ? <CountUp to={starCount} className="font-bold" aria-hidden="true" /> : null}
 					<StarIcon aria-hidden="true" />
 				</a>
 			}

@@ -1,6 +1,8 @@
 import z from "zod";
 import { protectedProcedure } from "../../context";
-import { isAgentEnvironmentUnavailable, throwUnavailable } from "./routing";
+import { agentThreadSchema, agentConversationSchema } from "../../dto/agent";
+import { paginate, paginationShape } from "../../pagination";
+import { mapAgentEnvironmentError } from "./routing";
 import { agentService } from "./service";
 
 export const threadsRouter = {
@@ -12,37 +14,47 @@ export const threadsRouter = {
 			operationId: "listAgentThreads",
 			summary: "List agent threads",
 		})
-		.handler(async ({ context }) => {
-			try {
-				return await agentService.threads.list({ userId: context.user.id });
-			} catch (error) {
-				if (isAgentEnvironmentUnavailable(error)) throwUnavailable();
-				throw error;
-			}
-		}),
+		.use(mapAgentEnvironmentError)
+		.output(z.array(agentThreadSchema))
+		.input(z.object(paginationShape).default({}))
+		.handler(async ({ context, input }) =>
+			paginate(await agentService.threads.list({ userId: context.user.id }), input, context.resHeaders),
+		),
 
-	create: protectedProcedure
+	start: protectedProcedure
 		.route({
 			method: "POST",
 			path: "/agent/threads",
 			tags: ["Agent"],
-			operationId: "createAgentThread",
-			summary: "Create agent thread",
+			operationId: "startAgentThread",
+			summary: "Start a document, application or career conversation",
+			description:
+				"Starts an assistant conversation about one resume or cover letter, using the given tested provider or the default one. The assistant reads the document and proposes edits; it never changes the document itself.",
 		})
-		.input(z.object({ aiProviderId: z.string().optional(), sourceResumeId: z.string().optional() }))
-		.handler(async ({ context, input }) => {
-			try {
-				return await agentService.threads.create({
-					userId: context.user.id,
-					locale: context.locale,
-					...(input.aiProviderId ? { aiProviderId: input.aiProviderId } : {}),
-					...(input.sourceResumeId ? { sourceResumeId: input.sourceResumeId } : {}),
-				});
-			} catch (error) {
-				if (isAgentEnvironmentUnavailable(error)) throwUnavailable();
-				throw error;
-			}
-		}),
+		.input(
+			z
+				.object({
+					resumeId: z.string().min(1).optional(),
+					coverLetterId: z.string().min(1).optional(),
+					aiProviderId: z.string().optional(),
+					scope: z.enum(["document", "application", "career"]).default("document"),
+					applicationId: z.string().min(1).optional(),
+				})
+				.refine(
+					(input) =>
+						input.scope === "document"
+							? Boolean(input.resumeId) !== Boolean(input.coverLetterId) && !input.applicationId
+							: !input.resumeId &&
+								!input.coverLetterId &&
+								(input.scope === "application") === Boolean(input.applicationId),
+					{
+						message: "Choose one document, one application, or general career context.",
+					},
+				),
+		)
+		.use(mapAgentEnvironmentError)
+		.output(agentThreadSchema)
+		.handler(({ context, input }) => agentService.threads.start({ userId: context.user.id, ...input })),
 
 	get: protectedProcedure
 		.route({
@@ -53,33 +65,30 @@ export const threadsRouter = {
 			summary: "Get agent thread",
 		})
 		.input(z.object({ id: z.string() }))
-		.handler(async ({ context, input }) => {
-			try {
-				return await agentService.threads.get({ id: input.id, userId: context.user.id });
-			} catch (error) {
-				if (isAgentEnvironmentUnavailable(error)) throwUnavailable();
-				throw error;
-			}
-		}),
+		.use(mapAgentEnvironmentError)
+		.output(agentConversationSchema)
+		.handler(({ context, input }) => agentService.threads.get({ id: input.id, userId: context.user.id })),
 
-	archive: protectedProcedure
+	update: protectedProcedure
 		.route({
-			method: "POST",
-			path: "/agent/threads/{id}/archive",
+			method: "PATCH",
+			path: "/agent/threads/{id}",
 			tags: ["Agent"],
-			operationId: "archiveAgentThread",
-			summary: "Archive agent thread",
+			operationId: "updateAgentThread",
+			summary: "Switch a conversation's model or rename it",
 		})
-		.input(z.object({ id: z.string() }))
-		.output(z.void())
-		.handler(async ({ context, input }) => {
-			try {
-				await agentService.threads.archive({ id: input.id, userId: context.user.id });
-			} catch (error) {
-				if (isAgentEnvironmentUnavailable(error)) throwUnavailable();
-				throw error;
-			}
-		}),
+		.input(
+			z
+				.object({
+					id: z.string(),
+					aiProviderId: z.string().min(1).optional(),
+					title: z.string().trim().min(1).max(200).optional(),
+				})
+				.refine((input) => input.aiProviderId || input.title, { message: "Give a model or a title." }),
+		)
+		.use(mapAgentEnvironmentError)
+		.output(agentThreadSchema)
+		.handler(({ context, input }) => agentService.threads.update({ ...input, userId: context.user.id })),
 
 	delete: protectedProcedure
 		.route({
@@ -91,12 +100,6 @@ export const threadsRouter = {
 		})
 		.input(z.object({ id: z.string() }))
 		.output(z.void())
-		.handler(async ({ context, input }) => {
-			try {
-				await agentService.threads.delete({ id: input.id, userId: context.user.id });
-			} catch (error) {
-				if (isAgentEnvironmentUnavailable(error)) throwUnavailable();
-				throw error;
-			}
-		}),
+		.use(mapAgentEnvironmentError)
+		.handler(({ context, input }) => agentService.threads.delete({ id: input.id, userId: context.user.id })),
 };

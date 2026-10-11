@@ -1,79 +1,74 @@
-import { Trans } from "@lingui/react/macro";
-import { HandHeartIcon } from "@phosphor-icons/react";
-import { useCallback } from "react";
-import { toast } from "sonner";
+import { t } from "@lingui/core/macro";
+import { useRouterState } from "@tanstack/react-router";
+import Cookies from "js-cookie";
+import { AnimatePresence, m } from "motion/react";
+import { useId, useState } from "react";
 import { useTimeout } from "usehooks-ts";
 import { Button } from "@reactive-resume/ui/components/button";
-import { useCookie } from "@reactive-resume/ui/hooks/use-cookie";
+import { Icon } from "@reactive-resume/ui/components/icon";
+import { cn } from "@reactive-resume/utils/style";
+import { D3, EASE, EXIT } from "@/libs/motion";
 
-const TOAST_ID = "donation-toast";
-const SHOW_TOAST_DELAY_MS = 5 * 60 * 1000; // 5 minutes
+const DONATE_URL = "https://opencollective.com/reactive-resume/donate";
+const SHOW_DELAY_MS = 5 * 60 * 1000; // 5 minutes
 const DISMISSED_COOKIE_NAME = "donation-toast-dismissed";
-const DISMISSED_COOKIE_EXPIRES_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-
-const getDismissedCookieExpiresAt = () => new Date(Date.now() + DISMISSED_COOKIE_EXPIRES_MS);
 
 export function DonationToast() {
-	const [dismissed, setDismissed] = useCookie(DISMISSED_COOKIE_NAME);
+	const titleId = useId();
+	const pathname = useRouterState({ select: (state) => state.location.pathname });
+	const [open, setOpen] = useState(false);
 
-	const showToast = useCallback(() => {
-		if (dismissed === "true") return;
+	// Never closes by itself: "Maybe later", or donating, is what records the 1-week cookie.
+	useTimeout(() => setOpen(true), Cookies.get(DISMISSED_COOKIE_NAME) === "true" ? null : SHOW_DELAY_MS);
 
-		const onDonate = (t: string | number) => {
-			toast.dismiss(t);
-			setDismissed("true", { expires: getDismissedCookieExpiresAt() });
-			window.open("https://opencollective.com/reactive-resume/donate", "_blank", "noopener,noreferrer");
-		};
+	const dismiss = () => {
+		setOpen(false);
+		Cookies.set(DISMISSED_COOKIE_NAME, "true", { expires: 7, path: "/", secure: true, sameSite: "lax" });
+	};
 
-		const onDismiss = (t: string | number) => {
-			toast.dismiss(t);
-			setDismissed("true", { expires: getDismissedCookieExpiresAt() });
-		};
-
-		toast.custom((t) => <DonationToastCard onDismiss={() => onDismiss(t)} onDonate={() => onDonate(t)} />, {
-			id: TOAST_ID,
-			unstyled: true,
-			dismissible: false,
-			duration: Number.POSITIVE_INFINITY,
-		});
-	}, [dismissed, setDismissed]);
-
-	useTimeout(showToast, SHOW_TOAST_DELAY_MS);
-
-	return null;
-}
-
-type DonationToastCardProps = {
-	onDismiss: () => void;
-	onDonate: () => void;
-};
-
-function DonationToastCard({ onDismiss, onDonate }: DonationToastCardProps) {
 	return (
-		<div className="w-sm rounded-md bg-popover p-4 shadow-xl">
-			<div className="flex items-start gap-3">
-				<div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-amber-300 text-amber-950">
-					<HandHeartIcon aria-hidden="true" />
-				</div>
+		<AnimatePresence>
+			{open && (
+				<m.aside
+					aria-labelledby={titleId}
+					initial={{ opacity: 0, y: 8 }}
+					animate={{ opacity: 1, y: 0, transition: { duration: D3, ease: EASE } }}
+					exit={{ opacity: 0, y: 6, transition: { duration: D3 * EXIT, ease: EASE } }}
+					className={cn(
+						// Open Collective's blue, dark enough for white text (4.8:1).
+						"[--oc:#1869f5]",
+						"fixed inset-x-3 bottom-3 z-40 flex gap-3 rounded-xl border border-line bg-surface p-4 shadow-e2 sm:inset-x-auto sm:end-5 sm:bottom-5 sm:w-[344px]",
+						// Clears the dashboard's bottom tab bar on phones.
+						pathname.startsWith("/dashboard") && "max-sm:bottom-[calc(64px+env(safe-area-inset-bottom))]",
+					)}
+				>
+					<Icon name="hand-heart" className="mt-px shrink-0 text-(--oc)" />
 
-				<div className="min-w-0 flex-1 space-y-1">
-					<p className="font-semibold text-sm tracking-tight">
-						<Trans>Please support the project</Trans>
-					</p>
-					<p className="text-pretty text-muted-foreground text-xs">
-						<Trans>Reactive Resume is free and open source. If it has helped you, please consider donating.</Trans>
-					</p>
-				</div>
-			</div>
+					<div className="min-w-0">
+						<p id={titleId} className="text-sm font-semibold text-ink">
+							{t`Enjoying Reactive Resume?`}
+						</p>
+						<p className="mt-1 text-[13px] leading-relaxed text-ink-2">
+							{t`It's free and open source, kept going by donations from the people who use it. If it has helped you, consider chipping in.`}
+						</p>
 
-			<div className="mt-4 grid grid-cols-2 gap-2">
-				<Button size="sm" variant="outline" onClick={onDismiss}>
-					<Trans>Dismiss</Trans>
-				</Button>
-				<Button size="sm" onClick={onDonate} className="bg-amber-300 text-amber-950 hover:bg-amber-200">
-					<Trans>Donate</Trans>
-				</Button>
-			</div>
-		</div>
+						<div className="mt-3 flex items-center gap-1">
+							<Button
+								size="sm"
+								nativeButton={false}
+								render={<a href={DONATE_URL} target="_blank" rel="noopener noreferrer" />}
+								onClick={dismiss}
+								className="bg-(--oc) text-white hover:bg-(--oc) hover:brightness-[0.92]"
+							>
+								{t`Donate`}
+							</Button>
+							<Button variant="ghost" size="sm" onClick={dismiss} className="text-ink-2">
+								{t`Maybe later`}
+							</Button>
+						</div>
+					</div>
+				</m.aside>
+			)}
+		</AnimatePresence>
 	);
 }

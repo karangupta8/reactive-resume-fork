@@ -14,6 +14,7 @@ export const rateLimitConfig = {
 			max: 60,
 			customRules: {
 				"/sign-in/email": { window: 60, max: 5 },
+				"/sign-in/username": { window: 60, max: 5 },
 				"/sign-up/email": { window: 60, max: 3 },
 				"/request-password-reset": { window: 600, max: 3 },
 				"/send-verification-email": { window: 600, max: 3 },
@@ -41,8 +42,6 @@ export const rateLimitConfig = {
 		resumePassword: { maxRequests: 5, window: 10 * 60 * 1000 },
 		pdfExport: { maxRequests: 5, window: 60 * 1000 },
 		aiRequest: { maxRequests: 20, window: 60 * 1000 },
-		jobsSearch: { maxRequests: 30, window: 60 * 1000 },
-		jobsTestConnection: { maxRequests: 10, window: 60 * 1000 },
 		storageUpload: { maxRequests: 20, window: 60 * 1000 },
 		storageDelete: { maxRequests: 30, window: 60 * 1000 },
 		resumeMutations: { maxRequests: 300, window: 60 * 1000 },

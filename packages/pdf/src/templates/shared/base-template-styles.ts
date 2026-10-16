@@ -76,7 +76,8 @@ export function createBaseTemplateStyles({
 
 		link: {
 			textDecoration: "none",
-			color: foreground,
+			// Underlined links read as links: show them in the accent colour (blue in the ATS style).
+			color: metadata.page.hideLinkUnderline ? foreground : metadata.design.colors.primary,
 		} satisfies Style,
 
 		small: {

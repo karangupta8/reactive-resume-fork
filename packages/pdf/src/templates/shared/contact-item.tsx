@@ -2,6 +2,7 @@ import type { IconName } from "../../forme/icons";
 import type { Style } from "../../forme/style-types";
 import type { CustomField } from "@reactive-resume/schema/resume/data";
 import { View } from "#react-pdf-renderer";
+import { useRender } from "../../context";
 import { resolvedPdfFlowProps } from "../../semantic/adapter";
 import { useResolvedNode, useSemanticNodeKey, useSemanticNodeVisible } from "../../semantic/context";
 import { semanticNodeKeys } from "../../semantic/node-keys";
@@ -10,6 +11,14 @@ import { Icon, Link, Text } from "./primitives";
 import { composeStyles } from "./styles";
 
 type ContactStyle = Style | Style[];
+
+// Underlined links read as links: in that mode the contact text takes the accent colour too.
+const useLinkColor = (): Style | undefined => {
+	const { metadata } = useRender();
+	return metadata.page.hideLinkUnderline ? undefined : { color: metadata.design.colors.primary };
+};
+const linkTextProps = (textStyle: ContactStyle | undefined, color: Style | undefined) =>
+	textStyle || color ? { style: composeStyles(textStyle, color) } : {};
 
 type WebsiteDisplay = {
 	url: string;
@@ -53,13 +62,14 @@ export const WebsiteContactItem = ({
 	primitiveNodeKey,
 }: WebsiteContactItemProps) => {
 	const keys = useContactNodeKeys("website", undefined, primitiveNodeKey);
+	const linkColor = useLinkColor();
 	const visible = useSemanticNodeVisible(keys.primitiveNodeKey);
 	if (!website.url || !visible) return null;
 
 	return (
 		<Link nodeKey={keys.primitiveNodeKey} src={website.url} {...(style ? { style } : {})}>
 			<Icon nodeKey={keys.iconNodeKey} name="globe" {...(iconColor ? { color: iconColor } : {})} />
-			<Text nodeKey={keys.fieldNodeKey} {...(textStyle ? { style: textStyle } : {})}>
+			<Text nodeKey={keys.fieldNodeKey} {...linkTextProps(textStyle, linkColor)}>
 				{getWebsiteDisplayText(website)}
 			</Text>
 		</Link>
@@ -75,12 +85,13 @@ export const CustomFieldContactItem = ({
 }: CustomFieldContactItemProps) => {
 	const linkUrl = getCustomFieldLinkUrl(field);
 	const keys = useContactNodeKeys("custom", field.id, primitiveNodeKey);
+	const linkColor = useLinkColor();
 	const resolved = useResolvedNode(keys.primitiveNodeKey);
 	const visible = useSemanticNodeVisible(keys.primitiveNodeKey);
 	const children = (
 		<>
 			<Icon nodeKey={keys.iconNodeKey} name={field.icon as IconName} {...(iconColor ? { color: iconColor } : {})} />
-			<Text nodeKey={keys.fieldNodeKey} {...(textStyle ? { style: textStyle } : {})}>
+			<Text nodeKey={keys.fieldNodeKey} {...linkTextProps(textStyle, linkUrl ? linkColor : undefined)}>
 				{field.text}
 			</Text>
 		</>
@@ -121,12 +132,13 @@ export const EmailContactItem = ({
 	primitiveNodeKey,
 }: EmailContactItemProps) => {
 	const keys = useContactNodeKeys("email", undefined, primitiveNodeKey);
+	const linkColor = useLinkColor();
 	const visible = useSemanticNodeVisible(keys.primitiveNodeKey);
 	if (!email || !visible) return null;
 	return (
 		<Link nodeKey={keys.primitiveNodeKey} src={`mailto:${email}`} {...(style ? { style } : {})}>
 			<Icon nodeKey={keys.iconNodeKey} name={iconName} {...(iconColor ? { color: iconColor } : {})} />
-			<Text nodeKey={keys.fieldNodeKey} {...(textStyle ? { style: textStyle } : {})}>
+			<Text nodeKey={keys.fieldNodeKey} {...linkTextProps(textStyle, linkColor)}>
 				{email}
 			</Text>
 		</Link>
@@ -143,12 +155,13 @@ type PhoneContactItemProps = {
 
 export const PhoneContactItem = ({ phone, style, textStyle, iconColor, primitiveNodeKey }: PhoneContactItemProps) => {
 	const keys = useContactNodeKeys("phone", undefined, primitiveNodeKey);
+	const linkColor = useLinkColor();
 	const visible = useSemanticNodeVisible(keys.primitiveNodeKey);
 	if (!phone || !visible) return null;
 	return (
 		<Link nodeKey={keys.primitiveNodeKey} src={`tel:${phone}`} {...(style ? { style } : {})}>
 			<Icon nodeKey={keys.iconNodeKey} name="phone" {...(iconColor ? { color: iconColor } : {})} />
-			<Text nodeKey={keys.fieldNodeKey} {...(textStyle ? { style: textStyle } : {})}>
+			<Text nodeKey={keys.fieldNodeKey} {...linkTextProps(textStyle, linkColor)}>
 				{phone}
 			</Text>
 		</Link>

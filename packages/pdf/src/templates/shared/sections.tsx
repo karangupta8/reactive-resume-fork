@@ -821,6 +821,21 @@ const ProfileSection = ({ sectionId = "profiles", sectionData }: ItemSectionProp
 	);
 };
 
+/**
+ * A page can end on an entry header whose bullets all start on the next page. Splitting the first
+ * list item off lets the header and that one bullet be kept together while the rest flows freely.
+ */
+const splitFirstListItem = (html: string, enabled: boolean): { first: string; rest: string } => {
+	const empty = { first: "", rest: "" };
+	if (!enabled || !html) return empty;
+	const open = /^\s*(<ul[^>]*>)/i.exec(html);
+	const end = html.search(/<\/li>/i);
+	if (!open || end < 0) return empty;
+	const cut = end + "</li>".length;
+	const rest = html.slice(cut).replace(/<\/ul>\s*$/i, "");
+	return { first: `${html.slice(0, cut)}</ul>`, rest: rest.trim() ? `${open[1]}${rest}</ul>` : "" };
+};
+
 type ExperienceItemContentProps = {
 	item: ExperienceItem;
 	header: ReactNode;
@@ -829,6 +844,7 @@ type ExperienceItemContentProps = {
 };
 
 const ExperienceItemContent = ({ item, header, splitRowStyle, alignEndStyle }: ExperienceItemContentProps) => {
+	const itemStyle = useTemplateStyle("item");
 	const itemNodeKey = useSemanticNodeKey();
 	const renderedChildKeys = useRenderedChildKeys(itemNodeKey);
 	const headerNodeKey = itemNodeKey ? semanticNodeKeys.itemHeader(itemNodeKey) : undefined;
@@ -855,18 +871,39 @@ const ExperienceItemContent = ({ item, header, splitRowStyle, alignEndStyle }: E
 			</SemanticItemNodeKeyProvider>
 		),
 	}));
+	// Split off the first bullet so the header can be kept with it (see below).
+	const { first: firstBullet, rest: restBullets } = splitFirstListItem(
+		item.description,
+		headerExists && item.roles.length === 0,
+	);
 	const entries = [
 		...(headerExists && headerNodeKey
-			? [{ nodeKey: headerNodeKey, value: <Fragment key={headerNodeKey}>{header}</Fragment> }]
+			? [
+					{
+						nodeKey: headerNodeKey,
+						value: (
+							<Fragment key={headerNodeKey}>
+								{firstBullet ? (
+									<View wrap={false} style={{ flexDirection: "column", rowGap: mergeStyles(itemStyle).rowGap }}>
+										{header}
+										<RichText semanticField="description">{firstBullet}</RichText>
+									</View>
+								) : (
+									header
+								)}
+							</Fragment>
+						),
+					},
+				]
 			: []),
 		...roleEntries,
-		...(descriptionExists && descriptionNodeKey
+		...(descriptionExists && descriptionNodeKey && (!firstBullet || restBullets)
 			? [
 					{
 						nodeKey: descriptionNodeKey,
 						value: (
 							<Fragment key={descriptionNodeKey}>
-								<RichText semanticField="description">{item.description}</RichText>
+								<RichText semanticField="description">{firstBullet ? restBullets : item.description}</RichText>
 							</Fragment>
 						),
 					},
